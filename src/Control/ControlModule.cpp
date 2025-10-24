@@ -165,6 +165,7 @@ void poet::ControlModule::computeSpeciesErrors(
     for (uint32_t j = 0; j < size_per_prop; ++j) {
       const double ref_value = reference_values[base_idx + j];
       const double sur_value = surrogate_values[base_idx + j];
+      const double ZERO_ABS = 1e-13;
 
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
         nan_count++;
@@ -174,18 +175,32 @@ void poet::ControlModule::computeSpeciesErrors(
       ref_sum += ref_value;
       sur_sum += sur_value;
 
-      if (ref_value == 0.0) {
-        if (sur_value != 0.0) {
+      if (std::abs(ref_value) < ZERO_ABS) {
+        if (std::abs(sur_value) >= ZERO_ABS) {
+          std::cerr << "[CTRL TRACE] species=" << this->species_names[i]
+                    << " idx=" << i << " base_idx=" << base_idx << " j=" << j
+                    << " sur_value=" << sur_value << "\n";
           err_sum += 1.0;
           sqr_err_sum += 1.0;
         }
-        // Both zero: skip
-      } else {
+      }
+      // Both zero: skip
+      else {
         double alpha = 1.0 - (sur_value / ref_value);
         err_sum += std::abs(alpha);
         sqr_err_sum += alpha * alpha;
       }
     }
+    if (valid_count > 0) {
+      species_error_stats.mape[i] = 100.0 * (err_sum / valid_count);
+      species_error_stats.rrmse[i] = std::sqrt(sqr_err_sum / valid_count);
+    } else {
+      species_error_stats.mape[i] = 0.0;
+      species_error_stats.rrmse[i] = 0.0;
+      std::cerr << "[CTRL WARN] no valid samples for species " << i << " ("
+                << this->species_names[i] << "), setting errors to 0\n";
+    }
+    /*
     // sample printing (keeps previous behavior: species 5 and 6)
     if (i == 5 || i == 6) {
       std::cerr << "[CTRL SAMPLE] species_index=" << i
@@ -202,16 +217,7 @@ void poet::ControlModule::computeSpeciesErrors(
         std::cerr << surrogate_values[base_idx + j]
                   << (j + 1 == N ? "\n" : " ");
     }
-
-    if (valid_count > 0) {
-      species_error_stats.mape[i] = 100.0 * (err_sum / valid_count);
-      species_error_stats.rrmse[i] = std::sqrt(sqr_err_sum / valid_count);
-    } else {
-      species_error_stats.mape[i] = 0.0;
-      species_error_stats.rrmse[i] = 0.0;
-      std::cerr << "[CTRL WARN] no valid samples for species " << i << " ("
-                << this->species_names[i] << "), setting errors to 0\n";
-    }
+    */
 
     // DEBUG: detailed diagnostics for Ba/Cl (or whichever indices)
     if (this->species_names[i] == "Ba" || this->species_names[i] == "Cl") {
