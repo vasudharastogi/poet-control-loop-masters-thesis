@@ -42,22 +42,26 @@ void poet::ControlModule::endIteration(const uint32_t iter) {
   /* Control Logic*/
   if (control_interval_enabled &&
       checkpoint_interval > 0 /*&& !rollback_enabled*/) {
-    MSG("Writing checkpoint of iteration " + std::to_string(iter));
-    write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
-                     {.field = chem->getField(), .iteration = iter});
-    writeStatsToCSV(error_history, species_names, out_dir, "stats_overview");
+    if (!chem) {
+      MSG("chem pointer is null — skipping checkpoint/stats write");
+    } else {
+      MSG("Writing checkpoint of iteration " + std::to_string(iter));
+      write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
+                       {.field = chem->getField(), .iteration = iter});
+      writeStatsToCSV(error_history, species_names, out_dir, "stats_overview");
 
-    /*
+      /*
 
-    if (triggerRollbackIfExceeded(*chem, *params, iter)) {
-      rollback_enabled = true;
-      rollback_counter++;
-      sur_disabled_counter = control_interval;
-      MSG("Interpolation disabled for the next " +
-          std::to_string(control_interval) + ".");
+      if (triggerRollbackIfExceeded(*chem, *params, iter)) {
+        rollback_enabled = true;
+        rollback_counter++;
+        sur_disabled_counter = control_interval;
+        MSG("Interpolation disabled for the next " +
+            std::to_string(control_interval) + ".");
+      }
+
+      */
     }
-
-    */
   }
 }
 
@@ -97,8 +101,8 @@ bool poet::ControlModule::triggerRollbackIfExceeded(ChemistryModule &chem,
 
       MSG("[THRESHOLD EXCEEDED] " + props[i] +
           " has MAPE = " + std::to_string(mape[i]) +
-          " exceeding threshold = " + std::to_string(params.mape_threshold[i]) +
-          " → rolling back to iteration " + std::to_string(rollback_iter));
+          " exceeding threshold = " + std::to_string(params.mape_threshold[i])
++ " → rolling back to iteration " + std::to_string(rollback_iter));
 
       Checkpoint_s checkpoint_read{.field = chem.getField()};
       read_checkpoint(params.out_dir,
@@ -122,14 +126,53 @@ void poet::ControlModule::computeSpeciesErrors(
                                            global_iteration,
                                            /*rollback_counter*/ 0);
 
+  if (reference_values.size() != surrogate_values.size()) {
+    MSG(" Reference and surrogate vectors differ in size: " +
+        std::to_string(reference_values.size()) + " vs " +
+        std::to_string(surrogate_values.size()));
+    return;
+  }
+
+  const std::size_t expected =
+      static_cast<std::size_t>(this->species_names.size()) * size_per_prop;
+  if (reference_values.size() < expected) {
+    std::cerr << "[CTRL ERROR] input vectors too small: expected >= "
+              << expected << " entries, got " << reference_values.size()
+              << "\n";
+    return;
+  }
+
+  int idxBa = -1, idxCl = -1;
+  for (size_t k = 0; k < this->species_names.size(); ++k) {
+    if (this->species_names[k] == "Ba")
+      idxBa = (int)k;
+    if (this->species_names[k] == "Cl")
+      idxCl = (int)k;
+  }
+  if (idxBa < 0 || idxCl < 0) {
+    std::cerr << "[CTRL DIAG] Ba/Cl indices not found: Ba=" << idxBa
+              << " Cl=" << idxCl << "\n";
+  }
+
   for (uint32_t i = 0; i < this->species_names.size(); ++i) {
     double err_sum = 0.0;
     double sqr_err_sum = 0.0;
     uint32_t base_idx = i * size_per_prop;
+    uint32_t nan_count = 0;
+    uint32_t valid_count = 0;
+    double ref_sum = 0.0, sur_sum = 0.0;
 
     for (uint32_t j = 0; j < size_per_prop; ++j) {
       const double ref_value = reference_values[base_idx + j];
       const double sur_value = surrogate_values[base_idx + j];
+
+      if (std::isnan(ref_value) || std::isnan(sur_value)) {
+        nan_count++;
+        continue;
+      }
+      valid_count++;
+      ref_sum += ref_value;
+      sur_sum += sur_value;
 
       if (ref_value == 0.0) {
         if (sur_value != 0.0) {
@@ -143,10 +186,45 @@ void poet::ControlModule::computeSpeciesErrors(
         sqr_err_sum += alpha * alpha;
       }
     }
+    // sample printing (keeps previous behavior: species 5 and 6)
+    if (i == 5 || i == 6) {
+      std::cerr << "[CTRL SAMPLE] species_index=" << i
+                << " name=" << this->species_names[i]
+                << " base_idx=" << base_idx << " nan_count=" << nan_count
+                << " valid_count=" << valid_count << std::endl;
+      uint32_t N = std::min<uint32_t>(size_per_prop, 20u);
+      std::cerr << "[CTRL SAMPLE] reference: ";
+      for (uint32_t j = 0; j < N; ++j)
+        std::cerr << reference_values[base_idx + j]
+                  << (j + 1 == N ? "\n" : " ");
+      std::cerr << "[CTRL SAMPLE] surrogate: ";
+      for (uint32_t j = 0; j < N; ++j)
+        std::cerr << surrogate_values[base_idx + j]
+                  << (j + 1 == N ? "\n" : " ");
+    }
 
-    species_error_stats.mape[i] = 100.0 * (err_sum / size_per_prop);
-    species_error_stats.rrmse[i] =
-        (size_per_prop > 0) ? std::sqrt(sqr_err_sum / size_per_prop) : 0.0;
+    if (valid_count > 0) {
+      species_error_stats.mape[i] = 100.0 * (err_sum / valid_count);
+      species_error_stats.rrmse[i] = std::sqrt(sqr_err_sum / valid_count);
+    } else {
+      species_error_stats.mape[i] = 0.0;
+      species_error_stats.rrmse[i] = 0.0;
+      std::cerr << "[CTRL WARN] no valid samples for species " << i << " ("
+                << this->species_names[i] << "), setting errors to 0\n";
+    }
+
+    // DEBUG: detailed diagnostics for Ba/Cl (or whichever indices)
+    if (this->species_names[i] == "Ba" || this->species_names[i] == "Cl") {
+      double mean_ref = (valid_count > 0) ? (ref_sum / valid_count) : 0.0;
+      double mean_sur = (valid_count > 0) ? (sur_sum / valid_count) : 0.0;
+      std::cerr << "[CTRL DIAG] species=" << this->species_names[i]
+                << " idx=" << i << " base_idx=" << base_idx
+                << " valid_count=" << valid_count << " nan_count=" << nan_count
+                << " err_sum=" << err_sum << " sqr_err_sum=" << sqr_err_sum
+                << " mean_ref=" << mean_ref << " mean_sur=" << mean_sur
+                << " computed_MAPE=" << species_error_stats.mape[i]
+                << " computed_RRMSE=" << species_error_stats.rrmse[i] << "\n";
+    }
   }
   error_history.push_back(species_error_stats);
 }

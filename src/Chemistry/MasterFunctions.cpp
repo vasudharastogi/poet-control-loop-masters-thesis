@@ -282,17 +282,6 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       //          LOOP_WORK, this->group_comm);
       MPI_Send(send_buffer.data(), send_buffer.size(), MPI_DOUBLE, p + 1,
                LOOP_WORK, this->group_comm);
-      
-            /* ---- DEBUG LOG (Sender side) ---- */
-      std::cout << "[DEBUG][rank=" << p+1
-                << "] sending WP " << (count_pkgs - 1)
-                << " to worker rank " << (p + 1)
-                << " | len=" << send_buffer.size()
-                << " | start index=" << wp_start_index
-                << " | second element=" << send_buffer[1]
-                << " | pkg size=" << local_work_package_size
-                << std::endl;
-      /* -------------------------------- */
 
       /* Mark that worker has work to do */
       w_list[p].has_work = 1;
@@ -466,7 +455,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  std::vector<double> mpi_surr_buffer{mpi_buffer};
+  std::vector<double> mpi_surr_buffer;
+  mpi_surr_buffer.resize(mpi_buffer.size());
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();

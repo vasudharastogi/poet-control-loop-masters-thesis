@@ -650,8 +650,8 @@ int main(int argc, char *argv[]) {
                               init_list.getChemistryInit(), MPI_COMM_WORLD);
     
     ControlModule control;
-
     chemistry.setControlModule(&control);
+    control.setChemistryModule(&chemistry);
 
     const ChemistryModule::SurrogateSetup surr_setup = {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),

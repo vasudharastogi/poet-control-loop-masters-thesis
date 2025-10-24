@@ -30,6 +30,8 @@ public:
 
   void endIteration(const uint32_t iter);
 
+  void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
+
  // void BCastControlFlags();
 
   //bool triggerRollbackIfExceeded(ChemistryModule &chem,
