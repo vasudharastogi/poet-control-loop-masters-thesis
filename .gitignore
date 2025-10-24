@@ -2,22 +2,6 @@
 # Created by https://www.toptal.com/developers/gitignore/api/c,c++,r,cmake
 # Edit at https://www.toptal.com/developers/gitignore?templates=c,c++,r,cmake
 
-
-# Ignore everything in bin/
-bin/*
-
-# But keep these specific files
-!bin/barite_fgcs_2.pqi
-!bin/barite_fgcs_2.qs2
-!bin/barite_fgcs_2.R
-!bin/dol.pqi
-!bin/dolo_fgcs_3.qs2
-!bin/dolo_fgcs_3.R
-!bin/dolo_fgcs_3.pqi
-!bin/phreeqc_kin.dat
-!bin/run_poet.sh
-
-
 ### C ###
 # Prerequisites
 *.d
@@ -162,7 +146,18 @@ build/
 .codechecker
 
 # Prevent upload of local installations
-bin/
+bin/*
 share/
 lib/
 include/
+
+# But keep these specific files
+!bin/barite_fgcs_2.pqi
+!bin/barite_fgcs_2.qs2
+!bin/barite_fgcs_2.R
+!bin/dol.pqi
+!bin/dolo_fgcs_3.qs2
+!bin/dolo_fgcs_3.R
+!bin/dolo_fgcs_3.pqi
+!bin/phreeqc_kin.dat
+!bin/run_poet.sh
