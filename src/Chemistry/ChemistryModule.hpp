@@ -3,10 +3,9 @@
 #define CHEMISTRYMODULE_H_
 
 #include "ChemistryDefs.hpp"
+#include "Control/ControlModule.hpp"
 #include "DataStructures/Field.hpp"
 #include "DataStructures/NamedVector.hpp"
-#include "ChemistryDefs.hpp"
-#include "Control/ControlModule.hpp"
 #include "Init/InitialList.hpp"
 #include "NameDouble.h"
 #include "PhreeqcRunner.hpp"
@@ -22,7 +21,7 @@
 #include <vector>
 
 namespace poet {
-  class ControlModule;
+class ControlModule;
 /**
  * \brief Wrapper around PhreeqcRM to provide POET specific parallelization with
  * easy access.
@@ -252,7 +251,15 @@ public:
 
   std::vector<int> ai_surrogate_validity_vector;
 
-  void setControlModule(poet::ControlModule *ctrl) { control_module = ctrl; }
+  void SetControlModule(poet::ControlModule *ctrl) { control_module = ctrl; }
+
+  void SetDhtEnabled(bool enabled) { dht_enabled = enabled; }
+  bool GetDhtEnabled() const { return dht_enabled; }
+
+  void SetInterpEnabled(bool enabled) { interp_enabled = enabled; }
+  bool GetInterpEnabled() const { return interp_enabled; }
+
+  void SetWarmupEnabled(bool enabled) { warmup_enabled = enabled; }
 
 protected:
   void initializeDHT(uint32_t size_mb,
@@ -267,13 +274,13 @@ protected:
 
   enum {
     CHEM_FIELD_INIT,
-    CHEM_DHT_ENABLE,
+    //CHEM_DHT_ENABLE,
     CHEM_DHT_SIGNIF_VEC,
     CHEM_DHT_SNAPS,
     CHEM_DHT_READ_FILE,
-    //CHEM_IP,   // Control flag
-    CHEM_CTRL, // Control flag
-    CHEM_IP_ENABLE,
+    //CHEM_WARMUP_PHASE,  // Control flag
+    //CHEM_CTRL_ENABLE, // Control flag
+    //CHEM_IP_ENABLE,
     CHEM_IP_MIN_ENTRIES,
     CHEM_IP_SIGNIF_VEC,
     CHEM_WORK_LOOP,
@@ -387,7 +394,7 @@ protected:
 
   bool ai_surrogate_enabled{false};
 
-  static constexpr uint32_t BUFFER_OFFSET = 5;
+  static constexpr uint32_t BUFFER_OFFSET = 6;
 
   inline void ChemBCast(void *buf, int count, MPI_Datatype datatype) const {
     MPI_Bcast(buf, count, datatype, 0, this->group_comm);
@@ -396,6 +403,9 @@ protected:
   inline void PropagateFunctionType(int &type) const {
     ChemBCast(&type, 1, MPI_INT);
   }
+
+  void PropagateControlLogic(int type, int flag);
+
   double simtime = 0.;
   double idle_t = 0.;
   double seq_t = 0.;
@@ -422,6 +432,7 @@ protected:
   poet::ControlModule *control_module = nullptr;
 
   bool control_enabled{false};
+  bool warmup_enabled{false};
 
   // std::vector<double> sur_shuffled;
 };

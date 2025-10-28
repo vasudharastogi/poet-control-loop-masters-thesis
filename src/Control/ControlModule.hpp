@@ -22,20 +22,18 @@ public:
   // std::uint32_t sur_disabled_counter = 0;
   // std::uint32_t rollback_counter = 0;
 
-  void updateControlIteration(const uint32_t iter);
+  void UpdateControlIteration(const uint32_t &iter, const bool &dht_enabled,
+                              const bool &interp_enaled);
+
+  void InitiateWarmupPhase(bool dht_enabled, bool interp_enabled);
 
   auto GetGlobalIteration() const noexcept { return global_iteration; }
 
   // void beginIteration();
 
-  void endIteration(const uint32_t iter);
+  // void BCastControlFlags();
 
-  void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
-
- // void BCastControlFlags();
-
-  //bool triggerRollbackIfExceeded(ChemistryModule &chem,
-    //                             RuntimeParameters &params, uint32_t &iter);
+  bool RollbackIfThresholdExceeded(ChemistryModule &chem);
 
   struct SimulationErrorStats {
     std::vector<double> mape;
@@ -43,14 +41,15 @@ public:
     uint32_t iteration; // iterations in simulation after rollbacks
     uint32_t rollback_count;
 
-    SimulationErrorStats(uint32_t species_count, uint32_t iter, uint32_t counter)
+    SimulationErrorStats(uint32_t species_count, uint32_t iter,
+                         uint32_t counter)
         : mape(species_count, 0.0), rrmse(species_count, 0.0), iteration(iter),
           rollback_count(counter) {}
   };
 
-  void computeSpeciesErrors(const std::vector<double> &reference_values,
-                                   const std::vector<double> &surrogate_values,
-                                   const uint32_t size_per_prop);
+  void ComputeSpeciesErrorMetrics(const std::vector<double> &reference_values,
+                            const std::vector<double> &surrogate_values,
+                            const uint32_t size_per_prop);
 
   std::vector<SimulationErrorStats> error_history;
 
@@ -62,7 +61,7 @@ public:
     std::vector<double> mape_threshold;
   };
 
-  void enableControlLogic(const ControlSetup &setup) {
+  void EnableControlLogic(const ControlSetup &setup) {
     this->out_dir = setup.out_dir;
     this->checkpoint_interval = setup.checkpoint_interval;
     this->control_interval = setup.control_interval;
@@ -73,6 +72,10 @@ public:
   bool GetControlIntervalEnabled() const {
     return this->control_interval_enabled;
   }
+
+  void EndIteration(const uint32_t iter);
+
+  void SetChemistryModule(poet::ChemistryModule *c) { chem = c; }
 
   auto GetControlInterval() const { return this->control_interval; }
 

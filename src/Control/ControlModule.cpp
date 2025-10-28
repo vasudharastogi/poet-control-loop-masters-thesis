@@ -4,19 +4,59 @@
 #include "IO/StatsIO.hpp"
 #include <cmath>
 
-void poet::ControlModule::updateControlIteration(const uint32_t iter) {
+void poet::ControlModule::UpdateControlIteration(const uint32_t &iter,
+                                                 const bool &dht_enabled,
+                                                 const bool &interp_enabled) {
 
-  global_iteration = iter;
+  /* dht_enabled and inter_enabled are user settings set before startig the
+   * simulation*/
 
   if (control_interval == 0) {
     control_interval_enabled = false;
     return;
   }
+  // InitiateWarmupPhase(dht_enabled, interp_enabled);
+  global_iteration = iter;
 
-  control_interval_enabled = (iter % control_interval == 0);
+  if (global_iteration <= control_interval) {
+    chem->SetWarmupEnabled(true);
+    chem->SetDhtEnabled(false);
+    chem->SetInterpEnabled(false);
+    MSG("Warmup enabled until first control interval at iteration " +
+        std::to_string(control_interval) + ".");
+  } else {
+    chem->SetWarmupEnabled(false);
+    chem->SetDhtEnabled(true);
+    chem->SetInterpEnabled(true);
+  }
+
+  control_interval_enabled =
+      (control_interval > 0 && iter % control_interval == 0);
+
   if (control_interval_enabled) {
     MSG("[Control] Control interval enabled at iteration " +
         std::to_string(iter));
+  }
+}
+
+void poet::ControlModule::InitiateWarmupPhase(bool dht_enabled,
+                                              bool interp_enabled) {
+
+  // user requested DHT/INTEP? keep them disabled but enable warmup-phase so
+  // workers do prepareKeys/fillDHT/writePairs as required.
+  if (global_iteration < control_interval) {
+    /* warmup phase: keep dht and interp disabled,
+   workers do prepareKeys/fillDHT/writePairs*/
+    chem->SetWarmupEnabled(true);
+    // chem->SetDhtEnabled(false);
+    // chem->SetInterpEnabled(false);
+    MSG("Warmup enabled until first control interval at iteration " +
+        std::to_string(control_interval) + ".");
+  } else {
+    /* after warmup phase: restore according to user's request*/
+    chem->SetWarmupEnabled(false);
+    // chem->SetDhtEnabled(dht_enabled);
+    // chem->SetInterpEnabled(interp_enabled);
   }
 }
 
@@ -33,35 +73,33 @@ void poet::ControlModule::beginIteration() {
 }
 */
 
-void poet::ControlModule::endIteration(const uint32_t iter) {
+void poet::ControlModule::EndIteration(const uint32_t iter) {
 
   if (!control_interval_enabled) {
     return;
   }
   /* Writing a checkpointing */
   /* Control Logic*/
-  if (control_interval_enabled &&
-      checkpoint_interval > 0 /*&& !rollback_enabled*/) {
-    if (!chem) {
-      MSG("chem pointer is null — skipping checkpoint/stats write");
-    } else {
-      MSG("Writing checkpoint of iteration " + std::to_string(iter));
-      write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
-                       {.field = chem->getField(), .iteration = iter});
-      writeStatsToCSV(error_history, species_names, out_dir, "stats_overview");
+  if (!chem) {
+    MSG("chem pointer is null — skipping checkpoint/stats write");
+  } else {
+    MSG("Writing checkpoint of iteration " + std::to_string(iter));
+    write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
+                     {.field = chem->getField(), .iteration = iter});
+    writeStatsToCSV(error_history, species_names, out_dir, "stats_overview");
 
-      /*
+    // if()
+    /*
 
-      if (triggerRollbackIfExceeded(*chem, *params, iter)) {
-        rollback_enabled = true;
-        rollback_counter++;
-        sur_disabled_counter = control_interval;
-        MSG("Interpolation disabled for the next " +
-            std::to_string(control_interval) + ".");
-      }
-
-      */
+    if (triggerRollbackIfExceeded(*chem, *params, iter)) {
+      rollback_enabled = true;
+      rollback_counter++;
+      sur_disabled_counter = control_interval;
+      MSG("Interpolation disabled for the next " +
+          std::to_string(control_interval) + ".");
     }
+
+    */
   }
 }
 
@@ -75,50 +113,45 @@ void poet::ControlModule::BCastControlFlags() {
 
 */
 
-/*
-bool poet::ControlModule::triggerRollbackIfExceeded(ChemistryModule &chem,
-                                                    RuntimeParameters &params,
-                                                    uint32_t &iter) {
 
+bool poet::ControlModule::RollbackIfThresholdExceeded(ChemistryModule &chem) {
+
+  /**
   if (error_history.empty()) {
     MSG("No error history yet; skipping rollback check.");
     return false;
   }
 
-  const auto &mape = chem.error_history.back().mape;
-  const auto &props = chem.getField().GetProps();
+  const auto &mape = error_history.back().mape;
 
-  for (uint32_t i = 0; i < params.mape_threshold.size(); ++i) {
-    // Skip invalid entries
+  for (uint32_t i = 0; i < species_names.size(); ++i) {
     if (mape[i] == 0) {
       continue;
     }
-    bool mape_exceeded = mape[i] > params.mape_threshold[i];
 
-    if (mape_exceeded) {
-      uint32_t rollback_iter = ((iter - 1) / params.checkpoint_interval) *
-                               params.checkpoint_interval;
+    if (mape[i] > mape_threshold[i]) {
+      uint32_t rollback_iter = ((global_iteration - 1) / checkpoint_interval) *
+                               checkpoint_interval;
 
-      MSG("[THRESHOLD EXCEEDED] " + props[i] +
+      MSG("[THRESHOLD EXCEEDED] " + species_names[i] +
           " has MAPE = " + std::to_string(mape[i]) +
-          " exceeding threshold = " + std::to_string(params.mape_threshold[i])
+          " exceeding threshold = " + std::to_string(mape_threshold[i])
 + " → rolling back to iteration " + std::to_string(rollback_iter));
 
       Checkpoint_s checkpoint_read{.field = chem.getField()};
-      read_checkpoint(params.out_dir,
+      read_checkpoint(out_dir,
                       "checkpoint" + std::to_string(rollback_iter) + ".hdf5",
                       checkpoint_read);
-      iter = checkpoint_read.iteration;
+      global_iteration = checkpoint_read.iteration;
       return true;
     }
   }
-  MSG("All species are within their MAPE and RRMSE thresholds.");
-  return
-
-  false;
+  MSG("All species are within their MAPE thresholds.");
+  return false;
+  */
 }
-*/
-void poet::ControlModule::computeSpeciesErrors(
+
+void poet::ControlModule::ComputeSpeciesErrorMetrics(
     const std::vector<double> &reference_values,
     const std::vector<double> &surrogate_values, const uint32_t size_per_prop) {
 
@@ -142,25 +175,12 @@ void poet::ControlModule::computeSpeciesErrors(
     return;
   }
 
-  int idxBa = -1, idxCl = -1;
-  for (size_t k = 0; k < this->species_names.size(); ++k) {
-    if (this->species_names[k] == "Ba")
-      idxBa = (int)k;
-    if (this->species_names[k] == "Cl")
-      idxCl = (int)k;
-  }
-  if (idxBa < 0 || idxCl < 0) {
-    std::cerr << "[CTRL DIAG] Ba/Cl indices not found: Ba=" << idxBa
-              << " Cl=" << idxCl << "\n";
-  }
-
   for (uint32_t i = 0; i < this->species_names.size(); ++i) {
     double err_sum = 0.0;
     double sqr_err_sum = 0.0;
     uint32_t base_idx = i * size_per_prop;
     uint32_t nan_count = 0;
     uint32_t valid_count = 0;
-    double ref_sum = 0.0, sur_sum = 0.0;
 
     for (uint32_t j = 0; j < size_per_prop; ++j) {
       const double ref_value = reference_values[base_idx + j];
@@ -172,14 +192,9 @@ void poet::ControlModule::computeSpeciesErrors(
         continue;
       }
       valid_count++;
-      ref_sum += ref_value;
-      sur_sum += sur_value;
 
       if (std::abs(ref_value) < ZERO_ABS) {
         if (std::abs(sur_value) >= ZERO_ABS) {
-          std::cerr << "[CTRL TRACE] species=" << this->species_names[i]
-                    << " idx=" << i << " base_idx=" << base_idx << " j=" << j
-                    << " sur_value=" << sur_value << "\n";
           err_sum += 1.0;
           sqr_err_sum += 1.0;
         }
@@ -199,37 +214,6 @@ void poet::ControlModule::computeSpeciesErrors(
       species_error_stats.rrmse[i] = 0.0;
       std::cerr << "[CTRL WARN] no valid samples for species " << i << " ("
                 << this->species_names[i] << "), setting errors to 0\n";
-    }
-    /*
-    // sample printing (keeps previous behavior: species 5 and 6)
-    if (i == 5 || i == 6) {
-      std::cerr << "[CTRL SAMPLE] species_index=" << i
-                << " name=" << this->species_names[i]
-                << " base_idx=" << base_idx << " nan_count=" << nan_count
-                << " valid_count=" << valid_count << std::endl;
-      uint32_t N = std::min<uint32_t>(size_per_prop, 20u);
-      std::cerr << "[CTRL SAMPLE] reference: ";
-      for (uint32_t j = 0; j < N; ++j)
-        std::cerr << reference_values[base_idx + j]
-                  << (j + 1 == N ? "\n" : " ");
-      std::cerr << "[CTRL SAMPLE] surrogate: ";
-      for (uint32_t j = 0; j < N; ++j)
-        std::cerr << surrogate_values[base_idx + j]
-                  << (j + 1 == N ? "\n" : " ");
-    }
-    */
-
-    // DEBUG: detailed diagnostics for Ba/Cl (or whichever indices)
-    if (this->species_names[i] == "Ba" || this->species_names[i] == "Cl") {
-      double mean_ref = (valid_count > 0) ? (ref_sum / valid_count) : 0.0;
-      double mean_sur = (valid_count > 0) ? (sur_sum / valid_count) : 0.0;
-      std::cerr << "[CTRL DIAG] species=" << this->species_names[i]
-                << " idx=" << i << " base_idx=" << base_idx
-                << " valid_count=" << valid_count << " nan_count=" << nan_count
-                << " err_sum=" << err_sum << " sqr_err_sum=" << sqr_err_sum
-                << " mean_ref=" << mean_ref << " mean_sur=" << mean_sur
-                << " computed_MAPE=" << species_error_stats.mape[i]
-                << " computed_RRMSE=" << species_error_stats.rrmse[i] << "\n";
     }
   }
   error_history.push_back(species_error_stats);

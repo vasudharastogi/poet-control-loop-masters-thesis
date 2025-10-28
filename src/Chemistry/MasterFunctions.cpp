@@ -232,6 +232,37 @@ inline void printProgressbar(int count_pkgs, int n_wp, int barWidth = 70) {
   /* end visual progress */
 }
 
+void poet::ChemistryModule::PropagateControlLogic(int type, int flag) {
+  /*
+  PropagateFunctionType(type);
+
+  static int master_bcast_seq = 0;
+  int tmp = flag ? 1 : 0;
+  std::cerr << "[MASTER BCAST " << master_bcast_seq << "] ftype=" << type
+            << " flag=" << tmp << std::endl
+            << std::flush;
+  master_bcast_seq++;
+  ChemBCast(&tmp, 1, MPI_INT);
+
+  switch (type) {
+  case CHEM_CTRL_ENABLE:
+    this->control_enabled = (tmp == 1);
+    break;
+  case CHEM_WARMUP_PHASE:
+    this->warmup_enabled = (tmp == 1);
+    break;
+  case CHEM_DHT_ENABLE:
+    this->dht_enabled = (tmp == 1);
+    break;
+  case CHEM_IP_ENABLE:
+    this->interp_enabled = (tmp == 1);
+    break;
+  default:
+    break;
+  }
+    */
+}
+
 inline void poet::ChemistryModule::MasterSendPkgs(
     worker_list_t &w_list, workpointer_t &work_pointer,
     workpointer_t &sur_pointer, int &pkg_to_send, int &count_pkgs,
@@ -249,6 +280,10 @@ inline void poet::ChemistryModule::MasterSendPkgs(
 
       local_work_package_size = (int)wp_sizes_vector[count_pkgs];
       count_pkgs++;
+
+      uint32_t wp_start_index =
+          std::accumulate(wp_sizes_vector.begin(),
+                          std::next(wp_sizes_vector.begin(), count_pkgs), 0);
 
       /* note current processed work package in workerlist */
       w_list[p].send_addr = work_pointer.base();
@@ -272,10 +307,12 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       // current time of simulation (age) in seconds
       send_buffer[end_of_wp + 3] = this->simtime;
       // current work package start location in field
-      uint32_t wp_start_index =
-          std::accumulate(wp_sizes_vector.begin(),
-                          std::next(wp_sizes_vector.begin(), count_pkgs), 0);
       send_buffer[end_of_wp + 4] = wp_start_index;
+      // control flags (bitmask)
+      int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 : 0) |
+                  (this->warmup_enabled ? 4 : 0) |
+                  (this->control_enabled ? 8 : 0);
+      send_buffer[end_of_wp + 5] = static_cast<double>(flags);
 
       /* ATTENTION Worker p has rank p+1 */
       // MPI_Send(send_buffer, end_of_wp + BUFFER_OFFSET, MPI_DOUBLE, p + 1,
@@ -427,18 +464,35 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
               MPI_INT);
   }
 
-  uint32_t control_flag = control_module->GetControlIntervalEnabled();
-  if (control_flag) {
-    ftype = CHEM_CTRL;
-    PropagateFunctionType(ftype);
-    ChemBCast(&control_flag, 1, MPI_INT);
+  // ftype = CHEM_IP_ENABLE;
+  // ftype = CHEM_WARMUP_PHASE;
+  /*
+  PropagateFunctionType(ftype);
+  int warmup_flag = this->warmup_enabled ? 1 : 0;
+  if (warmup_flag) {
+    this->interp_enabled = false;
+    int interp_flag = 0;
+    ChemBCast(&interp_flag, 1, MPI_INT);
+
+    // PropagateControlLogic(CHEM_WARMUP_PHASE, 1);
+    // PropagateControlLogic(CHEM_DHT_ENABLE, 0);
+    // PropagateControlLogic(CHEM_IP_ENABLE, 0);
+  } else {
+    this->interp_enabled = true;
+    int interp_flag = 1;
+    ChemBCast(&interp_flag, 1, MPI_INT);
+
+    // PropagateControlLogic(CHEM_WARMUP_PHASE, 0);
+    // PropagateControlLogic(CHEM_DHT_ENABLE, 1);
+    // PropagateControlLogic(CHEM_IP_ENABLE, 1);
   }
 
-  /*
-  ftype = CHEM_IP;
-  PropagateFunctionType(ftype);
-  ctrl_module->BCastControlFlags();
-*/
+  int control_flag = this->control_module->GetControlIntervalEnabled() ? 1 : 0;
+  if (control_flag) {
+    PropagateControlLogic(CHEM_CTRL_ENABLE, control_flag);
+  }
+    */
+
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
 
@@ -455,8 +509,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  std::vector<double> mpi_surr_buffer;
-  mpi_surr_buffer.resize(mpi_buffer.size());
+  control_enabled = this->control_module->GetControlIntervalEnabled() ? 1 : 0;
+  std::vector<double> mpi_surr_buffer{mpi_buffer};
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
@@ -511,15 +565,48 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-
-  if (control_flag) {
+  if (control_enabled) {
     std::cout << "[Master] Control logic enabled for this iteration."
               << std::endl;
     std::vector<double> sur_unshuffled{mpi_surr_buffer};
     unshuffleField(mpi_surr_buffer, this->n_cells, this->prop_count,
                    wp_sizes_vector.size(), sur_unshuffled);
 
-    control_module->computeSpeciesErrors(out_vec, sur_unshuffled,
+    // Quick debug: compare out_vec vs sur_unshuffled
+    size_t N = out_vec.size();
+    if (N != sur_unshuffled.size()) {
+      std::cerr << "[MASTER DBG] size mismatch out_vec=" << N
+                << " sur_unshuffled=" << sur_unshuffled.size() << std::endl;
+    } /*else {
+      double max_abs = 0.0;
+      double max_rel = 0.0;
+      size_t worst_i = 0;
+      for (size_t i = 0; i < N; i) {
+        double a = out_vec[i];
+        double b = sur_unshuffled[i];
+        double absd = std::fabs(a - b);
+        if (absd > max_abs) {
+          max_abs = absd;
+          worst_i = i;
+        }
+        double rel = (std::fabs(a) > 1e-12) ? absd / std::fabs(a) : (absd > 0 ?
+    1e12 : 0.0); if (rel > max_rel) max_rel = rel;
+      }
+      std::cerr << "[MASTER DBG] control compare N=" << N
+                << " max_abs=" << max_abs << " max_rel=" << max_rel
+                << " worst_idx=" << worst_i
+                << " out_vec[worst]=" << out_vec[worst_i]
+                << " sur[worst]=" << sur_unshuffled[worst_i] << std::endl;
+      // optionally print first 8 entries
+      std::cerr << "[MASTER DBG] out[0..7]: ";
+      for (size_t i = 0; i < std::min<size_t>(8, N); i) std::cerr << out_vec[i]
+    << " "; std::cerr << "\n[MASTER DBG] sur[0..7]: "; for (size_t i = 0; i <
+    std::min<size_t>(8, N); +i) std::cerr << sur_unshuffled[i] << " "; std::cerr
+    << std::endl;
+    }
+    */
+
+    control_module->ComputeSpeciesErrorMetrics(out_vec, sur_unshuffled,
                                          this->n_cells);
   }
 

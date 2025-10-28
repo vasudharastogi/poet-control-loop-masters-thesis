@@ -315,7 +315,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     //control.beginIteration(iter);
 
     // params.global_iter = iter;
-    control.updateControlIteration(iter);
+    control.UpdateControlIteration(iter, params.use_dht, params.use_interp);
     // params.control_interval_enabled = (iter % params.control_interval == 0);
 
     double start_t = MPI_Wtime();
@@ -428,7 +428,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
-    control.endIteration(iter);
+    control.EndIteration(iter);
         /*
         if (iter % params.checkpoint_interval == 0) {
           MSG("Writing checkpoint of iteration " + std::to_string(iter));
@@ -650,8 +650,8 @@ int main(int argc, char *argv[]) {
                               init_list.getChemistryInit(), MPI_COMM_WORLD);
     
     ControlModule control;
-    chemistry.setControlModule(&control);
-    control.setChemistryModule(&chemistry);
+    chemistry.SetControlModule(&control);
+    control.SetChemistryModule(&chemistry);
 
     const ChemistryModule::SurrogateSetup surr_setup = {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
@@ -676,7 +676,7 @@ int main(int argc, char *argv[]) {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
         run_params.mape_threshold};
 
-    control.enableControlLogic(ctrl_setup);
+    control.EnableControlLogic(ctrl_setup);
 
     if (MY_RANK > 0) {
       chemistry.WorkerLoop();
