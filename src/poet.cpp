@@ -300,23 +300,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   double dSimTime{0};
 
   for (uint32_t iter = 1; iter < maxiter + 1; iter++) {
-    // Rollback countdowm
-
-    /*
-    if (params.rollback_enabled) {
-      if (params.sur_disabled_counter > 0) {
-        --params.sur_disabled_counter;
-        MSG("Rollback counter: " + std::to_string(params.sur_disabled_counter));
-      } else {
-        params.rollback_enabled = false;
-      }
-    }
-      */
-    //control.beginIteration(iter);
-
-    // params.global_iter = iter;
-    control.UpdateControlIteration(iter, params.use_dht, params.use_interp);
-    // params.control_interval_enabled = (iter % params.control_interval == 0);
+    control.updateControlIteration(iter, params.use_dht, params.use_interp);
 
     double start_t = MPI_Wtime();
 
@@ -332,8 +316,6 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
 
     /* run transport */
     diffusion.simulate(dt);
-
-    // chem.runtime_params = &params;
 
     chem.getField().update(diffusion.getField());
 
@@ -428,33 +410,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
-    control.EndIteration(iter);
-        /*
-        if (iter % params.checkpoint_interval == 0) {
-          MSG("Writing checkpoint of iteration " + std::to_string(iter));
-          write_checkpoint(params.out_dir,
-                           "checkpoint" + std::to_string(iter) + ".hdf5",
-                           {.field = chem.getField(), .iteration = iter});
-        }
-
-
-        if (params.control_interval_enabled && !params.rollback_enabled) {
-          writeStatsToCSV(chem.error_history, chem.getField().GetProps(),
-                          params.out_dir, "stats_overview");
-
-          if (triggerRollbackIfExceeded(chem, params, iter)) {
-            params.rollback_enabled = true;
-            params.rollback_counter++;
-            params.sur_disabled_counter = params.control_interval;
-            MSG("Interpolation disabled for the next " +
-                std::to_string(params.control_interval) + ".");
-          }
-        }
-
-        */
-
-        
-
+    control.applyControlLogic(chem, iter);      
     // MSG();
   } // END SIMULATION LOOP
 
@@ -471,14 +427,17 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   Rcpp::List diffusion_profiling;
   diffusion_profiling["simtime"] = diffusion.getTransportTime();
 
-  /*Rcpp::List ctrl_profiling;
-  ctrl_profiling["checkpointing_time"] = chkTime;
-  ctrl_profiling["ctrl_logic_master"] = chem.GetMasterCtrlLogicTime();
-  ctrl_profiling["bcast_ctrl_logic_master"] = chem.GetMasterCtrlBcastTime();
-  ctrl_profiling["recv_ctrl_logic_maser"] = chem.GetMasterRecvCtrlLogicTime();
-  ctrl_profiling["ctrl_logic_worker"] =
+  Rcpp::List ctrl_profiling;
+  ctrl_profiling["compute_metrics_master"] = chem.GetMasterCtrlMetricsTime();
+  ctrl_profiling["unshuffle_field_master"] = chem.GetMasterUnshuffleTime();
+  ctrl_profiling["w_checkpoint_master"] = control.getWriteCheckpointTime();
+  ctrl_profiling["r_checkpoint_master"] = control.getReadCheckpointTime();
+  ctrl_profiling["write_stats"] = control.getWriteMetricsTime();
+  ctrl_profiling["ctrl_logic_master"] = control.getUpdateCtrlLogicTime();
+  ctrl_profiling["recv_data_master"] = chem.GetMasterRecvCtrlDataTime();
+  ctrl_profiling["worker"] =
       Rcpp::wrap(chem.GetWorkerControlTimings());
-      */
+      
 
   if (params.use_dht) {
     chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
@@ -651,7 +610,7 @@ int main(int argc, char *argv[]) {
     
     ControlModule control;
     chemistry.SetControlModule(&control);
-    control.SetChemistryModule(&chemistry);
+    control.setChemistryModule(&chemistry);
 
     const ChemistryModule::SurrogateSetup surr_setup = {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
@@ -676,7 +635,7 @@ int main(int argc, char *argv[]) {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
         run_params.mape_threshold};
 
-    control.EnableControlLogic(ctrl_setup);
+    control.enableControlLogic(ctrl_setup);
 
     if (MY_RANK > 0) {
       chemistry.WorkerLoop();

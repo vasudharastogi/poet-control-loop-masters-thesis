@@ -335,6 +335,7 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
   /* declare most of the variables here */
   int need_to_receive = 1;
   double idle_a, idle_b;
+  double recv_ctrl_a, recv_ctrl_b;
   int p, size;
   std::vector<double> recv_buffer;
 
@@ -373,6 +374,7 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
       break;
     }
     case LOOP_CTRL: {
+      recv_ctrl_a = MPI_Wtime();
       /* layout of buffer is [phreeqc][surrogate] */
       MPI_Get_count(&probe_status, MPI_DOUBLE, &size);
       recv_buffer.resize(size);
@@ -385,6 +387,8 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
 
       std::copy(recv_buffer.begin() + (size / 2), recv_buffer.begin() + size,
                 w_list[p - 1].surrogate_addr);
+      recv_ctrl_b = MPI_Wtime();
+      recv_ctrl_t += recv_ctrl_b - recv_ctrl_a;
 
       handled = true;
       break;
@@ -450,6 +454,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   int free_workers;
   int i_pkgs;
   int ftype;
+  double shuf_a, shuf_b, metrics_a, metrics_b;
 
   const std::vector<uint32_t> wp_sizes_vector =
       CalculateWPSizesVector(this->n_cells, this->wp_size);
@@ -463,35 +468,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     ChemBCast(&this->ai_surrogate_validity_vector.front(), this->n_cells,
               MPI_INT);
   }
-
-  // ftype = CHEM_IP_ENABLE;
-  // ftype = CHEM_WARMUP_PHASE;
-  /*
-  PropagateFunctionType(ftype);
-  int warmup_flag = this->warmup_enabled ? 1 : 0;
-  if (warmup_flag) {
-    this->interp_enabled = false;
-    int interp_flag = 0;
-    ChemBCast(&interp_flag, 1, MPI_INT);
-
-    // PropagateControlLogic(CHEM_WARMUP_PHASE, 1);
-    // PropagateControlLogic(CHEM_DHT_ENABLE, 0);
-    // PropagateControlLogic(CHEM_IP_ENABLE, 0);
-  } else {
-    this->interp_enabled = true;
-    int interp_flag = 1;
-    ChemBCast(&interp_flag, 1, MPI_INT);
-
-    // PropagateControlLogic(CHEM_WARMUP_PHASE, 0);
-    // PropagateControlLogic(CHEM_DHT_ENABLE, 1);
-    // PropagateControlLogic(CHEM_IP_ENABLE, 1);
-  }
-
-  int control_flag = this->control_module->GetControlIntervalEnabled() ? 1 : 0;
-  if (control_flag) {
-    PropagateControlLogic(CHEM_CTRL_ENABLE, control_flag);
-  }
-    */
 
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
@@ -509,8 +485,13 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  control_enabled = this->control_module->GetControlIntervalEnabled() ? 1 : 0;
+  control_enabled = this->control_module->getControlIntervalEnabled() ? 1 : 0;
   std::vector<double> mpi_surr_buffer{mpi_buffer};
+
+  std::cout << "control_enabled is " << control_enabled << ", "
+            << "warmup_enabled is " << warmup_enabled << ", "
+            << "dht_enabled is " << dht_enabled << ", "
+            << "interp_enabled is " << interp_enabled << std::endl;
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
@@ -569,45 +550,24 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     std::cout << "[Master] Control logic enabled for this iteration."
               << std::endl;
     std::vector<double> sur_unshuffled{mpi_surr_buffer};
+
+    shuf_a = MPI_Wtime();
     unshuffleField(mpi_surr_buffer, this->n_cells, this->prop_count,
                    wp_sizes_vector.size(), sur_unshuffled);
+    shuf_b = MPI_Wtime();
+    this->shuf_t += shuf_b - shuf_a;
 
-    // Quick debug: compare out_vec vs sur_unshuffled
     size_t N = out_vec.size();
     if (N != sur_unshuffled.size()) {
       std::cerr << "[MASTER DBG] size mismatch out_vec=" << N
                 << " sur_unshuffled=" << sur_unshuffled.size() << std::endl;
-    } /*else {
-      double max_abs = 0.0;
-      double max_rel = 0.0;
-      size_t worst_i = 0;
-      for (size_t i = 0; i < N; i) {
-        double a = out_vec[i];
-        double b = sur_unshuffled[i];
-        double absd = std::fabs(a - b);
-        if (absd > max_abs) {
-          max_abs = absd;
-          worst_i = i;
-        }
-        double rel = (std::fabs(a) > 1e-12) ? absd / std::fabs(a) : (absd > 0 ?
-    1e12 : 0.0); if (rel > max_rel) max_rel = rel;
-      }
-      std::cerr << "[MASTER DBG] control compare N=" << N
-                << " max_abs=" << max_abs << " max_rel=" << max_rel
-                << " worst_idx=" << worst_i
-                << " out_vec[worst]=" << out_vec[worst_i]
-                << " sur[worst]=" << sur_unshuffled[worst_i] << std::endl;
-      // optionally print first 8 entries
-      std::cerr << "[MASTER DBG] out[0..7]: ";
-      for (size_t i = 0; i < std::min<size_t>(8, N); i) std::cerr << out_vec[i]
-    << " "; std::cerr << "\n[MASTER DBG] sur[0..7]: "; for (size_t i = 0; i <
-    std::min<size_t>(8, N); +i) std::cerr << sur_unshuffled[i] << " "; std::cerr
-    << std::endl;
     }
-    */
 
-    control_module->ComputeSpeciesErrorMetrics(out_vec, sur_unshuffled,
-                                         this->n_cells);
+    metrics_a = MPI_Wtime();
+    control_module->computeSpeciesErrorMetrics(out_vec, sur_unshuffled,
+                                               this->n_cells);
+    metrics_b = MPI_Wtime();
+    this->metrics_t += metrics_b - metrics_a;
   }
 
   /* start time measurement of master chemistry */

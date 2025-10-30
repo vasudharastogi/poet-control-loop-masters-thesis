@@ -174,6 +174,12 @@ public:
    */
   auto GetMasterLoopTime() const { return this->send_recv_t; }
 
+  auto GetMasterRecvCtrlDataTime() const { return this->recv_ctrl_t; }
+
+  auto GetMasterUnshuffleTime() const { return this->shuf_t; }
+
+  auto GetMasterCtrlMetricsTime() const { return this->metrics_t; }
+
   /**
    * **Master only** Collect and return all accumulated timings recorded by
    * workers to run Phreeqc simulation.
@@ -410,6 +416,10 @@ protected:
   double idle_t = 0.;
   double seq_t = 0.;
   double send_recv_t = 0.;
+
+  double recv_ctrl_t = 0.;
+  double shuf_t = 0.;
+  double metrics_t = 0.;
 
   std::array<double, 2> base_totals{0};
 

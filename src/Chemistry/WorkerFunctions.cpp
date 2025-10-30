@@ -155,6 +155,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   double dht_get_start, dht_get_end;
   double phreeqc_time_start, phreeqc_time_end;
   double dht_fill_start, dht_fill_end;
+  double ctrl_cp_start, ctrl_cp_end, ctrl_start, ctrl_end;
 
   uint32_t iteration;
   double dt;
@@ -239,11 +240,14 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   poet::WorkPackage s_curr_wp_control = s_curr_wp;
 
   if (control_enabled) {
+    ctrl_cp_start = MPI_Wtime();
     for (std::size_t wp_i = 0; wp_i < s_curr_wp_control.size; wp_i++) {
       s_curr_wp_control.output[wp_i] =
           std::vector<double>(this->prop_count, 0.0);
       s_curr_wp_control.mapping[wp_i] = CHEM_PQC;
     }
+    ctrl_cp_end = MPI_Wtime();
+    timings.ctrl_t += ctrl_cp_end - ctrl_cp_start;
   }
 
   phreeqc_time_start = MPI_Wtime();
@@ -254,7 +258,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   phreeqc_time_end = MPI_Wtime();
 
   if (control_enabled) {
-
+    ctrl_start = MPI_Wtime();
     std::size_t sur_wp_offset = s_curr_wp.size * this->prop_count;
 
     mpi_buffer.resize(count + sur_wp_offset);
@@ -281,7 +285,8 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
       }
     }
     count += sur_wp_offset;
-
+    ctrl_end = MPI_Wtime();
+    timings.ctrl_t += ctrl_end - ctrl_start;
   } else {
     for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
       std::copy(s_curr_wp.output[wp_i].begin(), s_curr_wp.output[wp_i].end(),
@@ -302,18 +307,8 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
     dht->fillDHT(control_enabled ? s_curr_wp_control : s_curr_wp);
     dht_fill_end = MPI_Wtime();
 
-    int filled_count = std::count(dht->getDHTResults().filledDHT.begin(),
-                                  dht->getDHTResults().filledDHT.end(), true);
-
-    std::cout << "[Worker " << std::to_string(this->comm_rank)
-              << "] DHT filled entries=" << std::to_string(filled_count)
-              << std::endl;
-
     if (interp_enabled || warmup_enabled) {
       interp->writePairs();
-      std::cout << "[Worker " << std::to_string(this->comm_rank) << "] "
-                << "Writing pairs to PHT after iteration "
-                << std::to_string(iteration) << std::endl;
     }
     timings.dht_fill += dht_fill_end - dht_fill_start;
   }
