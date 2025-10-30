@@ -250,10 +250,13 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
 
     params.timesteps =
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
+    params.checkpoint_interval = Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
     params.control_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("control_interval"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
+    params.ctrl_cell_ids =  Rcpp::as<std::vector<uint32_t>>(
+        global_rt_setup->operator[]("ctrl_cell_ids"));
 
     catch (const std::exception &e) {
       ERRMSG("Error while parsing R scripts: " + std::string(e.what()));

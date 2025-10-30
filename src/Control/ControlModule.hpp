@@ -52,6 +52,7 @@ public:
     std::uint32_t control_interval;
     std::vector<std::string> species_names;
     std::vector<double> mape_threshold;
+    std::vector<double> ctrl_cell_ids;
   };
 
   void enableControlLogic(const ControlSetup &setup) {
@@ -60,6 +61,7 @@ public:
     this->control_interval = setup.control_interval;
     this->species_names = setup.species_names;
     this->mape_threshold = setup.mape_threshold;
+    this->ctrl_cell_ids = setup.ctrl_cell_ids;
   }
 
   bool getControlIntervalEnabled() const {
@@ -77,6 +79,8 @@ public:
   auto getControlInterval() const { return this->control_interval; }
 
   std::vector<double> getMapeThreshold() const { return this->mape_threshold; }
+
+  std::vector<uint32_t> getCtrlCellIds() const { return this->ctrl_cell_ids; }
 
   /* Profiling getters */
 
@@ -100,6 +104,7 @@ private:
   std::uint32_t rollback_count = 0;
   std::uint32_t sur_disabled_counter = 0;
   std::vector<double> mape_threshold;
+  std::vector<uint32_t> ctrl_cell_ids;
 
   std::vector<std::string> species_names;
   std::string out_dir;
