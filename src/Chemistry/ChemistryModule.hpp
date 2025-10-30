@@ -410,8 +410,6 @@ protected:
     ChemBCast(&type, 1, MPI_INT);
   }
 
-  void PropagateControlLogic(int type, int flag);
-
   double simtime = 0.;
   double idle_t = 0.;
   double seq_t = 0.;

@@ -3,9 +3,9 @@
 #include <doctest/doctest.h>
 #include <vector>
 
-#include <Chemistry/ChemistryModule.hpp>
+#include <Control/ControlModule.hpp>
 
-TEST_CASE("Stats calculation")
+TEST_CASE("Metrics calculation")
 {
     std::vector<double> real =
         {
@@ -27,15 +27,15 @@ TEST_CASE("Stats calculation")
             2.8, 0.02, 0.7, 0.5
         };
 
-    poet::ChemistryModule::error_stats stats(6, 5);
-    poet::ChemistryModule::computeStats(real, pred, /*size_per_prop*/ 4, /*species_count*/ 6, stats);
+    poet::ControlModule::metricsHistory metrics(6, 5);
+    poet::ControlModule::computeSpeciesErrorMetrics(real, pred, /*size_per_prop*/ 4);
 
     SUBCASE("Non-zero values")
     {
 
         // species 1 is ID, should stay 0
-        CHECK_EQ(stats.mape[0], 0);
-        CHECK_EQ(stats.rrsme[0], 0);
+        CHECK_EQ(metrics.mape[0], 0);
+        CHECK_EQ(metrics.rrsme[0], 0);
 
         /*
         mape species 2
@@ -49,8 +49,8 @@ TEST_CASE("Stats calculation")
         rrsme = sqrt(1.02040816/4) = 0.50507627
         */
 
-        CHECK_EQ(stats.mape[1], doctest::Approx(28.5714286).epsilon(1e-6));
-        CHECK_EQ(stats.rrsme[1], doctest::Approx(0.50507627).epsilon(1e-6));
+        CHECK_EQ(metrics.mape[1], doctest::Approx(28.5714286).epsilon(1e-6));
+        CHECK_EQ(metrics.rrsme[1], doctest::Approx(0.50507627).epsilon(1e-6));
     }
 
     SUBCASE("Zero-denominator case")
@@ -65,8 +65,8 @@ TEST_CASE("Stats calculation")
         rrsme = 1
         */
 
-        CHECK_EQ(stats.mape[2], 100.0);
-        CHECK_EQ(stats.rrsme[2], 1.0);
+        CHECK_EQ(metrics.mape[2], 100.0);
+        CHECK_EQ(metrics.rrsme[2], 1.0);
     }
 
     SUBCASE("True and predicted values are zero")
@@ -81,8 +81,8 @@ TEST_CASE("Stats calculation")
         rrsme = 0.0
         */
 
-        CHECK_EQ(stats.mape[3], 0.0);
-        CHECK_EQ(stats.rrsme[3], 0.0);
+        CHECK_EQ(metrics.mape[3], 0.0);
+        CHECK_EQ(metrics.rrsme[3], 0.0);
     }
 
     SUBCASE("Negative values")
@@ -97,8 +97,8 @@ TEST_CASE("Stats calculation")
         rrsme = sqrt(13.6989796 / 4) = 1.85060663
         */
 
-        CHECK_EQ(stats.mape[4], doctest::Approx(183.92857143).epsilon(1e-6));
-        CHECK_EQ(stats.rrsme[4], doctest::Approx(1.85060663).epsilon(1e-6));
+        CHECK_EQ(metrics.mape[4], doctest::Approx(183.92857143).epsilon(1e-6));
+        CHECK_EQ(metrics.rrsme[4], doctest::Approx(1.85060663).epsilon(1e-6));
     }
 
     SUBCASE("Large differences")
@@ -113,7 +113,7 @@ TEST_CASE("Stats calculation")
         rrsme = sqrt(2,12262382 / 4) = 0.72846136
         */
 
-        CHECK_EQ(stats.mape[5], doctest::Approx(62.102492).epsilon(1e-6));
-        CHECK_EQ(stats.rrsme[5], doctest::Approx(0.72846136).epsilon(1e-6));
+        CHECK_EQ(metrics.mape[5], doctest::Approx(62.102492).epsilon(1e-6));
+        CHECK_EQ(metrics.rrsme[5], doctest::Approx(0.72846136).epsilon(1e-6));
     }
 }

@@ -232,37 +232,6 @@ inline void printProgressbar(int count_pkgs, int n_wp, int barWidth = 70) {
   /* end visual progress */
 }
 
-void poet::ChemistryModule::PropagateControlLogic(int type, int flag) {
-  /*
-  PropagateFunctionType(type);
-
-  static int master_bcast_seq = 0;
-  int tmp = flag ? 1 : 0;
-  std::cerr << "[MASTER BCAST " << master_bcast_seq << "] ftype=" << type
-            << " flag=" << tmp << std::endl
-            << std::flush;
-  master_bcast_seq++;
-  ChemBCast(&tmp, 1, MPI_INT);
-
-  switch (type) {
-  case CHEM_CTRL_ENABLE:
-    this->control_enabled = (tmp == 1);
-    break;
-  case CHEM_WARMUP_PHASE:
-    this->warmup_enabled = (tmp == 1);
-    break;
-  case CHEM_DHT_ENABLE:
-    this->dht_enabled = (tmp == 1);
-    break;
-  case CHEM_IP_ENABLE:
-    this->interp_enabled = (tmp == 1);
-    break;
-  default:
-    break;
-  }
-    */
-}
-
 inline void poet::ChemistryModule::MasterSendPkgs(
     worker_list_t &w_list, workpointer_t &work_pointer,
     workpointer_t &sur_pointer, int &pkg_to_send, int &count_pkgs,

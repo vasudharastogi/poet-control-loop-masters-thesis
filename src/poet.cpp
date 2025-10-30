@@ -465,7 +465,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   profiling["simtime"] = dSimTime;
   profiling["chemistry"] = chem_profiling;
   profiling["diffusion"] = diffusion_profiling;
-  //profiling["ctrl_logic"] = ctrl_profiling;
+  profiling["control_loop"] = ctrl_profiling;
 
   chem.MasterLoopBreak();
 
