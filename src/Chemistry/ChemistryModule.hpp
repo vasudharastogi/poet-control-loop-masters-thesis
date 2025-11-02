@@ -439,6 +439,8 @@ protected:
 
   poet::ControlModule *control_module = nullptr;
 
+  std::vector<double> mpi_surr_buffer;
+
   bool control_enabled{false};
   bool warmup_enabled{false};
 

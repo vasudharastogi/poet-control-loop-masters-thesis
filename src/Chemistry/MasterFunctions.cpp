@@ -257,6 +257,8 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       /* note current processed work package in workerlist */
       w_list[p].send_addr = work_pointer.base();
       w_list[p].surrogate_addr = sur_pointer.base();
+      // this->control_enabled ? sur_pointer.base() : w_list[p].surrogate_addr =
+      // nullptr;
 
       /* push work pointer to next work package */
       const uint32_t end_of_wp = local_work_package_size * this->prop_count;
@@ -354,6 +356,11 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
       std::copy(recv_buffer.begin(), recv_buffer.begin() + half,
                 w_list[p - 1].send_addr);
 
+      /*
+      if (w_list[p - 1].surrogate_addr == nullptr) {
+      throw std::runtime_error("MasterRecvPkgs: surrogate_addr is null");
+      }*/
+
       std::copy(recv_buffer.begin() + (size / 2), recv_buffer.begin() + size,
                 w_list[p - 1].surrogate_addr);
       recv_ctrl_b = MPI_Wtime();
@@ -443,6 +450,11 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
   MPI_Barrier(this->group_comm);
 
+  this->control_enabled = this->control_module->getControlIntervalEnabled();
+  if (this->control_enabled) {
+    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
+  }
+
   static uint32_t iteration = 0;
 
   /* start time measurement of sequential part */
@@ -454,20 +466,16 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  control_enabled = this->control_module->getControlIntervalEnabled() ? 1 : 0;
-  std::vector<double> mpi_surr_buffer{mpi_buffer};
-
-  std::cout << "control_enabled is " << control_enabled << ", "
-            << "warmup_enabled is " << warmup_enabled << ", "
-            << "dht_enabled is " << dht_enabled << ", "
-            << "interp_enabled is " << interp_enabled << std::endl;
+  //this->mpi_surr_buffer.resize(mpi_buffer.size());
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
   pkg_to_recv = wp_sizes_vector.size();
 
   workpointer_t work_pointer = mpi_buffer.begin();
-  workpointer_t sur_pointer = mpi_surr_buffer.begin();
+  workpointer_t sur_pointer = this->mpi_surr_buffer.begin();
+  //(this->control_enabled ? this->mpi_surr_buffer.begin()
+  //                     : mpi_buffer.end());
   worker_list_t worker_list(this->comm_size - 1);
 
   free_workers = this->comm_size - 1;
@@ -515,13 +523,13 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-  if (control_enabled) {
+  if (this->control_enabled) {
     std::cout << "[Master] Control logic enabled for this iteration."
               << std::endl;
     std::vector<double> sur_unshuffled{mpi_surr_buffer};
 
     shuf_a = MPI_Wtime();
-    unshuffleField(mpi_surr_buffer, this->n_cells, this->prop_count,
+    unshuffleField(this->mpi_surr_buffer, this->n_cells, this->prop_count,
                    wp_sizes_vector.size(), sur_unshuffled);
     shuf_b = MPI_Wtime();
     this->shuf_t += shuf_b - shuf_a;

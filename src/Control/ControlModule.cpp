@@ -39,13 +39,13 @@ void poet::ControlModule::initiateWarmupPhase(bool dht_enabled,
     chem->SetWarmupEnabled(true);
     chem->SetDhtEnabled(false);
     chem->SetInterpEnabled(false);
-    MSG("Warmup enabled until next control interval at iteration " +
-        std::to_string(control_interval) + ".");
+   // MSG("Warmup enabled until next control interval at iteration " +
+     //   std::to_string(control_interval) + ".");
 
     if (rollback_enabled) {
       if (sur_disabled_counter > 0) {
         --sur_disabled_counter;
-        MSG("Rollback counter: " + std::to_string(sur_disabled_counter));
+        //MSG("Rollback counter: " + std::to_string(sur_disabled_counter));
       } else {
         rollback_enabled = false;
       }
@@ -65,12 +65,14 @@ void poet::ControlModule::applyControlLogic(ChemistryModule &chem,
   }
   writeCheckpointAndMetrics(chem, iter);
 
-  if (checkAndRollback(chem, iter) && rollback_count < 4) {
+  if (checkAndRollback(chem, iter) /* && rollback_count < 4*/) {
     rollback_enabled = true;
     rollback_count++;
     sur_disabled_counter = control_interval;
+    /*
     MSG("Interpolation disabled for the next " +
         std::to_string(control_interval) + ".");
+    */
   }
 }
 
