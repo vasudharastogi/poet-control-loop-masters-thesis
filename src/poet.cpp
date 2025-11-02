@@ -250,12 +250,13 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
 
     params.timesteps =
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
-    params.checkpoint_interval = Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
+    params.checkpoint_interval =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
     params.control_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("control_interval"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
-    params.ctrl_cell_ids =  Rcpp::as<std::vector<uint32_t>>(
+    params.ctrl_cell_ids = Rcpp::as<std::vector<uint32_t>>(
         global_rt_setup->operator[]("ctrl_cell_ids"));
 
     catch (const std::exception &e) {
@@ -465,6 +466,30 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
     return profiling;
   }
 
+  static void getControlCellIds(const vector<uint32_t> &ids, int root,
+                                MPI_Comm comm) {
+    std::uint32_t n_ids = 0;
+    int rank;
+    MPI_Comm_rank(comm, &rank);
+    bool is_master = root == rank;
+
+    if (is_master) {
+      n_ids = ids.size();
+    }
+    // broadcast size of id vector
+    MPI_Bcast(n_ids, 1, MPI_UINT32_T, root, comm);
+
+    // worker
+    if (!is_master) {
+      ids.resize(n_ids);
+    }
+    // broadcast control cell ids
+    if (n_ids > 0) {
+      MPI_Bcast(ids.data(), n_ids, MPI_UINT32_T, root, comm);
+    }
+  }
+
+  
   std::vector<std::string> getSpeciesNames(const Field &&field, int root,
                                            MPI_Comm comm) {
     std::uint32_t n_elements;

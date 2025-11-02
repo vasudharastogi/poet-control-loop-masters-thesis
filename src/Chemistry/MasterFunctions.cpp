@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iomanip>
 #include <mpi.h>
 #include <vector>
 
@@ -39,6 +38,12 @@ std::vector<double> poet::ChemistryModule::GetWorkerPhreeqcTimings() const {
   int type = CHEM_PERF;
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
   return MasterGatherWorkerTimings(WORKER_PHREEQC);
+}
+
+std::vector<double> poet::ChemistryModule::GetWorkerControlTimings() const {
+  int type = CHEM_PERF;
+  MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
+  return MasterGatherWorkerTimings(WORKER_CTRL_ITER);
 }
 
 std::vector<double> poet::ChemistryModule::GetWorkerDHTGetTimings() const {
@@ -252,6 +257,8 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       /* note current processed work package in workerlist */
       w_list[p].send_addr = work_pointer.base();
       w_list[p].surrogate_addr = sur_pointer.base();
+      // this->control_enabled ? sur_pointer.base() : w_list[p].surrogate_addr =
+      // nullptr;
 
       /* push work pointer to next work package */
       const uint32_t end_of_wp = local_work_package_size * this->prop_count;
@@ -349,6 +356,11 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
       std::copy(recv_buffer.begin(), recv_buffer.begin() + half,
                 w_list[p - 1].send_addr);
 
+      /*
+      if (w_list[p - 1].surrogate_addr == nullptr) {
+      throw std::runtime_error("MasterRecvPkgs: surrogate_addr is null");
+      }*/
+
       std::copy(recv_buffer.begin() + (size / 2), recv_buffer.begin() + size,
                 w_list[p - 1].surrogate_addr);
       recv_ctrl_b = MPI_Wtime();
@@ -418,6 +430,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   int free_workers;
   int i_pkgs;
   int ftype;
+  double shuf_a, shuf_b, metrics_a, metrics_b;
 
   const std::vector<uint32_t> wp_sizes_vector =
       CalculateWPSizesVector(this->n_cells, this->wp_size);
@@ -435,47 +448,34 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
 
-  ftype = CHEM_INTERP;
-  PropagateFunctionType(ftype);
-
-  if (this->runtime_params->rollback_simulation) {
-    this->interp_enabled = false;
-    int interp_flag = 0;
-    ChemBCast(&interp_flag, 1, MPI_INT);
-  } else {
-    this->interp_enabled = true;
-    int interp_flag = 1;
-    ChemBCast(&interp_flag, 1, MPI_INT);
-  }
-
   MPI_Barrier(this->group_comm);
 
-  static uint32_t iteration = 0;
-  uint32_t control_iteration = static_cast<uint32_t>(
-      this->runtime_params->control_iteration_active ? 1 : 0);
-  if (control_iteration) {
-    sur_shuffled.clear();
-    sur_shuffled.reserve(this->n_cells * this->prop_count);
+  this->control_enabled = this->control_module->getControlIntervalEnabled();
+  if (this->control_enabled) {
+    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
   }
+
+  static uint32_t iteration = 0;
 
   /* start time measurement of sequential part */
   seq_a = MPI_Wtime();
 
   /* shuffle grid */
   // grid.shuffleAndExport(mpi_buffer);
-
   std::vector<double> mpi_buffer =
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  this->sur_shuffled.resize(mpi_buffer.size());
+  //this->mpi_surr_buffer.resize(mpi_buffer.size());
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
   pkg_to_recv = wp_sizes_vector.size();
 
   workpointer_t work_pointer = mpi_buffer.begin();
-  workpointer_t sur_pointer = sur_shuffled.begin();
+  workpointer_t sur_pointer = this->mpi_surr_buffer.begin();
+  //(this->control_enabled ? this->mpi_surr_buffer.begin()
+  //                     : mpi_buffer.end());
   worker_list_t worker_list(this->comm_size - 1);
 
   free_workers = this->comm_size - 1;
@@ -499,8 +499,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     if (pkg_to_send > 0) {
       // send packages to all free workers ...
       MasterSendPkgs(worker_list, work_pointer, sur_pointer, pkg_to_send,
-                     i_pkgs, free_workers, dt, iteration, control_iteration,
-                     wp_sizes_vector);
+                     i_pkgs, free_workers, dt, iteration, wp_sizes_vector);
     }
     // ... and try to receive them from workers who has finished their work
     MasterRecvPkgs(worker_list, pkg_to_recv, pkg_to_send > 0, free_workers);
@@ -524,15 +523,13 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-
- /* do master stuff */
-  if (control_enabled) {
+  if (this->control_enabled) {
     std::cout << "[Master] Control logic enabled for this iteration."
               << std::endl;
     std::vector<double> sur_unshuffled{mpi_surr_buffer};
 
     shuf_a = MPI_Wtime();
-    unshuffleField(mpi_surr_buffer, this->n_cells, this->prop_count,
+    unshuffleField(this->mpi_surr_buffer, this->n_cells, this->prop_count,
                    wp_sizes_vector.size(), sur_unshuffled);
     shuf_b = MPI_Wtime();
     this->shuf_t += shuf_b - shuf_a;
@@ -549,7 +546,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
   }
-
 
   /* start time measurement of master chemistry */
   sim_e_chemistry = MPI_Wtime();

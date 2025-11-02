@@ -2,19 +2,16 @@
 #ifndef CHEMISTRYMODULE_H_
 #define CHEMISTRYMODULE_H_
 
+#include "ChemistryDefs.hpp"
+#include "Control/ControlModule.hpp"
 #include "DataStructures/Field.hpp"
 #include "DataStructures/NamedVector.hpp"
-
-#include "ChemistryDefs.hpp"
-
 #include "Init/InitialList.hpp"
 #include "NameDouble.h"
+#include "PhreeqcRunner.hpp"
 #include "SurrogateModels/DHT_Wrapper.hpp"
 #include "SurrogateModels/Interpolation.hpp"
 
-#include "poet.hpp"
-
-#include "PhreeqcRunner.hpp"
 #include <array>
 #include <cstdint>
 #include <map>
@@ -24,6 +21,7 @@
 #include <vector>
 
 namespace poet {
+class ControlModule;
 /**
  * \brief Wrapper around PhreeqcRM to provide POET specific parallelization with
  * easy access.
@@ -173,7 +171,7 @@ public:
   /**
    * **Master only** Return the time in seconds the master spent in the
    * send/receive loop.
-   */    
+   */
   auto GetMasterLoopTime() const { return this->send_recv_t; }
 
   auto GetMasterRecvCtrlDataTime() const { return this->recv_ctrl_t; }
@@ -210,6 +208,8 @@ public:
    * \return Vector of all accumulated waiting times.
    */
   std::vector<double> GetWorkerIdleTimings() const;
+
+  std::vector<double> GetWorkerControlTimings() const;
 
   /**
    * **Master only** Collect and return DHT hits of all workers.
@@ -257,25 +257,15 @@ public:
 
   std::vector<int> ai_surrogate_validity_vector;
 
-  RuntimeParameters *runtime_params = nullptr;
-  uint32_t control_iteration_counter = 0;
+  void SetControlModule(poet::ControlModule *ctrl) { control_module = ctrl; }
 
-  struct error_stats {
-    std::vector<double> mape;
-    std::vector<double> rrsme;
-    uint32_t iteration;
+  void SetDhtEnabled(bool enabled) { dht_enabled = enabled; }
+  bool GetDhtEnabled() const { return dht_enabled; }
 
-    error_stats(size_t species_count, size_t iter)
-        : mape(species_count, 0.0), rrsme(species_count, 0.0), iteration(iter) {
-    }
-  };
+  void SetInterpEnabled(bool enabled) { interp_enabled = enabled; }
+  bool GetInterpEnabled() const { return interp_enabled; }
 
-  std::vector<error_stats> error_stats_history;
-
-  static void computeStats(const std::vector<double> &pqc_vector,
-                           const std::vector<double> &sur_vector,
-                           uint32_t size_per_prop, uint32_t species_count,
-                           error_stats &stats);
+  void SetWarmupEnabled(bool enabled) { warmup_enabled = enabled; }
 
 protected:
   void initializeDHT(uint32_t size_mb,
@@ -290,12 +280,13 @@ protected:
 
   enum {
     CHEM_FIELD_INIT,
-    CHEM_DHT_ENABLE,
+    //CHEM_DHT_ENABLE,
     CHEM_DHT_SIGNIF_VEC,
     CHEM_DHT_SNAPS,
     CHEM_DHT_READ_FILE,
-    CHEM_INTERP,
-    CHEM_IP_ENABLE,
+    //CHEM_WARMUP_PHASE,  // Control flag
+    //CHEM_CTRL_ENABLE, // Control flag
+    //CHEM_IP_ENABLE,
     CHEM_IP_MIN_ENTRIES,
     CHEM_IP_SIGNIF_VEC,
     CHEM_WORK_LOOP,
@@ -308,6 +299,7 @@ protected:
 
   enum {
     WORKER_PHREEQC,
+    WORKER_CTRL_ITER,
     WORKER_DHT_GET,
     WORKER_DHT_FILL,
     WORKER_IDLE,
@@ -330,6 +322,7 @@ protected:
     double dht_get = 0.;
     double dht_fill = 0.;
     double idle_t = 0.;
+    double ctrl_t = 0.;
   };
 
   struct worker_info_s {
@@ -347,7 +340,7 @@ protected:
   void MasterSendPkgs(worker_list_t &w_list, workpointer_t &work_pointer,
                       workpointer_t &sur_pointer, int &pkg_to_send,
                       int &count_pkgs, int &free_workers, double dt,
-                      uint32_t iteration, uint32_t control_iteration,
+                      uint32_t iteration,
                       const std::vector<uint32_t> &wp_sizes_vector);
   void MasterRecvPkgs(worker_list_t &w_list, int &pkg_to_recv, bool to_send,
                       int &free_workers);
@@ -385,6 +378,10 @@ protected:
 
   void BCastStringVec(std::vector<std::string> &io);
 
+  int packResultsIntoBuffer(std::vector<double> &mpi_buffer, int base_count,
+                            const WorkPackage &wp,
+                            const WorkPackage &wp_control);
+
   int comm_size, comm_rank;
   MPI_Comm group_comm;
 
@@ -412,6 +409,7 @@ protected:
   inline void PropagateFunctionType(int &type) const {
     ChemBCast(&type, 1, MPI_INT);
   }
+
   double simtime = 0.;
   double idle_t = 0.;
   double seq_t = 0.;
@@ -419,10 +417,9 @@ protected:
 
   double recv_ctrl_t = 0.;
   double shuf_t = 0.;
-  double metrics_t = 0.
+  double metrics_t = 0.;
 
-      std::array<double, 2>
-          base_totals{0};
+  std::array<double, 2> base_totals{0};
 
   bool print_progessbar{false};
 
@@ -442,8 +439,12 @@ protected:
 
   poet::ControlModule *control_module = nullptr;
 
+  std::vector<double> mpi_surr_buffer;
+
   bool control_enabled{false};
   bool warmup_enabled{false};
+
+  // std::vector<double> sur_shuffled;
 };
 } // namespace poet
 

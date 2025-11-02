@@ -52,7 +52,7 @@ public:
     std::uint32_t control_interval;
     std::vector<std::string> species_names;
     std::vector<double> mape_threshold;
-    std::vector<double> ctrl_cell_ids;
+    std::vector<uint32_t> ctrl_cell_ids;
   };
 
   void enableControlLogic(const ControlSetup &setup) {
