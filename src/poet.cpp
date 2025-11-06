@@ -252,476 +252,473 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
     params.checkpoint_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
-    params.control_interval =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("control_interval"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
     params.ctrl_cell_ids = Rcpp::as<std::vector<uint32_t>>(
         global_rt_setup->operator[]("ctrl_cell_ids"));
 
-    catch (const std::exception &e) {
-      ERRMSG("Error while parsing R scripts: " + std::string(e.what()));
-      return ParseRet::PARSER_ERROR;
-    }
-
-    return ParseRet::PARSER_OK;
+  } catch (const std::exception &e) {
+    ERRMSG("Error while parsing R scripts: " + std::string(e.what()));
+    return ParseRet::PARSER_ERROR;
   }
 
-  // HACK: this is a step back as the order and also the count of fields is
-  // predefined, but it will change in the future
-  void call_master_iter_end(RInside & R, const Field &trans,
-                            const Field &chem) {
-    R["TMP"] = Rcpp::wrap(trans.AsVector());
-    R["TMP_PROPS"] = Rcpp::wrap(trans.GetProps());
-    R.parseEval(std::string("state_T <- setNames(data.frame(matrix(TMP, nrow=" +
-                            std::to_string(trans.GetRequestedVecSize()) +
-                            ")), TMP_PROPS)"));
+  return ParseRet::PARSER_OK;
+}
 
-    R["TMP"] = Rcpp::wrap(chem.AsVector());
-    R["TMP_PROPS"] = Rcpp::wrap(chem.GetProps());
-    R.parseEval(std::string("state_C <- setNames(data.frame(matrix(TMP, nrow=" +
-                            std::to_string(chem.GetRequestedVecSize()) +
-                            ")), TMP_PROPS)"));
-    R["setup"] = *global_rt_setup;
-    R.parseEval("setup <- master_iteration_end(setup, state_T, state_C)");
-    *global_rt_setup = R["setup"];
+// HACK: this is a step back as the order and also the count of fields is
+// predefined, but it will change in the future
+void call_master_iter_end(RInside &R, const Field &trans, const Field &chem) {
+  R["TMP"] = Rcpp::wrap(trans.AsVector());
+  R["TMP_PROPS"] = Rcpp::wrap(trans.GetProps());
+  R.parseEval(std::string("state_T <- setNames(data.frame(matrix(TMP, nrow=" +
+                          std::to_string(trans.GetRequestedVecSize()) +
+                          ")), TMP_PROPS)"));
+
+  R["TMP"] = Rcpp::wrap(chem.AsVector());
+  R["TMP_PROPS"] = Rcpp::wrap(chem.GetProps());
+  R.parseEval(std::string("state_C <- setNames(data.frame(matrix(TMP, nrow=" +
+                          std::to_string(chem.GetRequestedVecSize()) +
+                          ")), TMP_PROPS)"));
+  R["setup"] = *global_rt_setup;
+  R.parseEval("setup <- master_iteration_end(setup, state_T, state_C)");
+  *global_rt_setup = R["setup"];
+}
+
+static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
+                                DiffusionModule &diffusion,
+                                ChemistryModule &chem, ControlModule &control) {
+
+  /* Iteration Count is dynamic, retrieving value from R (is only needed by
+   * master for the following loop) */
+  uint32_t maxiter = params.timesteps.size();
+
+  if (params.print_progress) {
+    chem.setProgressBarPrintout(true);
   }
+  R["TMP_PROPS"] = Rcpp::wrap(chem.getField().GetProps());
 
-  static Rcpp::List RunMasterLoop(
-      RInsidePOET & R, RuntimeParameters & params, DiffusionModule & diffusion,
-      ChemistryModule & chem, ControlModule & control) {
+  /* SIMULATION LOOP */
 
-    /* Iteration Count is dynamic, retrieving value from R (is only needed by
-     * master for the following loop) */
-    uint32_t maxiter = params.timesteps.size();
+  double dSimTime{0};
+  for (uint32_t iter = 1; iter < maxiter + 1; iter++) {
+    control.updateControlIteration(iter, params.use_dht, params.use_interp);
 
-    if (params.print_progress) {
-      chem.setProgressBarPrintout(true);
-    }
-    R["TMP_PROPS"] = Rcpp::wrap(chem.getField().GetProps());
+    double start_t = MPI_Wtime();
 
-    /* SIMULATION LOOP */
-
-    double dSimTime{0};
-    for (uint32_t iter = 1; iter < maxiter + 1; iter++) {
-      control.updateControlIteration(iter, params.use_dht, params.use_interp);
-
-      double start_t = MPI_Wtime();
-
-      const double &dt = params.timesteps[iter - 1];
-
-      std::cout << std::endl;
-
-      /* displaying iteration number, with C++ and R iterator */
-      MSG("Going through iteration " + std::to_string(iter) + "/" +
-          std::to_string(maxiter));
-
-      MSG("Current time step is " + std::to_string(dt));
-
-      /* run transport */
-      diffusion.simulate(dt);
-
-      chem.getField().update(diffusion.getField());
-
-      // MSG("Chemistry start");
-      if (params.use_ai_surrogate) {
-        double ai_start_t = MPI_Wtime();
-        // Save current values from the tug field as predictor for the ai step
-        R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
-        R.parseEval(
-            std::string("predictors <- setNames(data.frame(matrix(TMP, nrow=" +
-                        std::to_string(chem.getField().GetRequestedVecSize()) +
-                        ")), TMP_PROPS)"));
-        R.parseEval("predictors <- predictors[ai_surrogate_species]");
-
-        // Apply preprocessing
-        MSG("AI Preprocessing");
-        R.parseEval("predictors_scaled <- preprocess(predictors)");
-
-        // Predict
-        MSG("AI Prediction");
-        R.parseEval(
-            "aipreds_scaled <- prediction_step(model, predictors_scaled)");
-
-        // Apply postprocessing
-        MSG("AI Postprocessing");
-        R.parseEval("aipreds <- postprocess(aipreds_scaled)");
-
-        // Validate prediction and write valid predictions to chem field
-        MSG("AI Validation");
-        R.parseEval(
-            "validity_vector <- validate_predictions(predictors, aipreds)");
-
-        MSG("AI Marking accepted");
-        chem.set_ai_surrogate_validity_vector(R.parseEval("validity_vector"));
-
-        MSG("AI TempField");
-        std::vector<std::vector<double>> RTempField =
-            R.parseEval("set_valid_predictions(predictors,\
-                       aipreds,\
-                       validity_vector)");
-
-        MSG("AI Set Field");
-        Field predictions_field =
-            Field(R.parseEval("nrow(predictors)"), RTempField,
-                  R.parseEval("colnames(predictors)"));
-
-        MSG("AI Update");
-        chem.getField().update(predictions_field);
-        double ai_end_t = MPI_Wtime();
-        R["ai_prediction_time"] = ai_end_t - ai_start_t;
-      }
-
-      chem.simulate(dt);
-
-      /* AI surrogate iterative training*/
-      if (params.use_ai_surrogate) {
-        double ai_start_t = MPI_Wtime();
-
-        R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
-        R.parseEval(
-            std::string("targets <- setNames(data.frame(matrix(TMP, nrow=" +
-                        std::to_string(chem.getField().GetRequestedVecSize()) +
-                        ")), TMP_PROPS)"));
-        R.parseEval("targets <- targets[ai_surrogate_species]");
-
-        // TODO: Check how to get the correct columns
-        R.parseEval("target_scaled <- preprocess(targets)");
-
-        MSG("AI: incremental training");
-        R.parseEval("model <- training_step(model, predictors_scaled, "
-                    "target_scaled, validity_vector)");
-        double ai_end_t = MPI_Wtime();
-        R["ai_training_time"] = ai_end_t - ai_start_t;
-      }
-
-      // MPI_Barrier(MPI_COMM_WORLD);
-      double end_t = MPI_Wtime();
-      dSimTime += end_t - start_t;
-      R["totaltime"] = dSimTime;
-
-      // MDL master_iteration_end just writes on disk state_T and
-      // state_C after every iteration if the cmdline option
-      // --ignore-results is not given (and thus the R variable
-      // store_result is TRUE)
-      call_master_iter_end(R, diffusion.getField(), chem.getField());
-
-      // TODO: write checkpoint
-      // checkpoint struct --> field and iteration
-
-      diffusion.getField().update(chem.getField());
-
-      MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
-          std::to_string(maxiter));
-
-      control.applyControlLogic(chem, iter);
-      // MSG();
-    } // END SIMULATION LOOP
+    const double &dt = params.timesteps[iter - 1];
 
     std::cout << std::endl;
 
-    Rcpp::List chem_profiling;
-    chem_profiling["simtime"] = chem.GetChemistryTime();
-    chem_profiling["loop"] = chem.GetMasterLoopTime();
-    chem_profiling["sequential"] = chem.GetMasterSequentialTime();
-    chem_profiling["idle_master"] = chem.GetMasterIdleTime();
-    chem_profiling["idle_worker"] = Rcpp::wrap(chem.GetWorkerIdleTimings());
-    chem_profiling["phreeqc_time"] = Rcpp::wrap(chem.GetWorkerPhreeqcTimings());
+    /* displaying iteration number, with C++ and R iterator */
+    MSG("Going through iteration " + std::to_string(iter) + "/" +
+        std::to_string(maxiter));
 
-    Rcpp::List diffusion_profiling;
-    diffusion_profiling["simtime"] = diffusion.getTransportTime();
+    MSG("Current time step is " + std::to_string(dt));
 
-    if (params.use_dht) {
-      chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
-      chem_profiling["dht_evictions"] =
-          Rcpp::wrap(chem.GetWorkerDHTEvictions());
-      chem_profiling["dht_get_time"] =
-          Rcpp::wrap(chem.GetWorkerDHTGetTimings());
-      chem_profiling["dht_fill_time"] =
-          Rcpp::wrap(chem.GetWorkerDHTFillTimings());
+    /* run transport */
+    diffusion.simulate(dt);
+
+    chem.getField().update(diffusion.getField());
+
+    // MSG("Chemistry start");
+    if (params.use_ai_surrogate) {
+      double ai_start_t = MPI_Wtime();
+      // Save current values from the tug field as predictor for the ai step
+      R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
+      R.parseEval(
+          std::string("predictors <- setNames(data.frame(matrix(TMP, nrow=" +
+                      std::to_string(chem.getField().GetRequestedVecSize()) +
+                      ")), TMP_PROPS)"));
+      R.parseEval("predictors <- predictors[ai_surrogate_species]");
+
+      // Apply preprocessing
+      MSG("AI Preprocessing");
+      R.parseEval("predictors_scaled <- preprocess(predictors)");
+
+      // Predict
+      MSG("AI Prediction");
+      R.parseEval(
+          "aipreds_scaled <- prediction_step(model, predictors_scaled)");
+
+      // Apply postprocessing
+      MSG("AI Postprocessing");
+      R.parseEval("aipreds <- postprocess(aipreds_scaled)");
+
+      // Validate prediction and write valid predictions to chem field
+      MSG("AI Validation");
+      R.parseEval(
+          "validity_vector <- validate_predictions(predictors, aipreds)");
+
+      MSG("AI Marking accepted");
+      chem.set_ai_surrogate_validity_vector(R.parseEval("validity_vector"));
+
+      MSG("AI TempField");
+      std::vector<std::vector<double>> RTempField =
+          R.parseEval("set_valid_predictions(predictors,\
+                       aipreds,\
+                       validity_vector)");
+
+      MSG("AI Set Field");
+      Field predictions_field =
+          Field(R.parseEval("nrow(predictors)"), RTempField,
+                R.parseEval("colnames(predictors)"));
+
+      MSG("AI Update");
+      chem.getField().update(predictions_field);
+      double ai_end_t = MPI_Wtime();
+      R["ai_prediction_time"] = ai_end_t - ai_start_t;
     }
 
-    if (params.use_interp) {
-      chem_profiling["interp_w"] =
-          Rcpp::wrap(chem.GetWorkerInterpolationWriteTimings());
-      chem_profiling["interp_r"] =
-          Rcpp::wrap(chem.GetWorkerInterpolationReadTimings());
-      chem_profiling["interp_g"] =
-          Rcpp::wrap(chem.GetWorkerInterpolationGatherTimings());
-      chem_profiling["interp_fc"] =
-          Rcpp::wrap(chem.GetWorkerInterpolationFunctionCallTimings());
-      chem_profiling["interp_calls"] =
-          Rcpp::wrap(chem.GetWorkerInterpolationCalls());
-      chem_profiling["interp_cached"] =
-          Rcpp::wrap(chem.GetWorkerPHTCacheHits());
+    chem.simulate(dt);
+
+    /* AI surrogate iterative training*/
+    if (params.use_ai_surrogate) {
+      double ai_start_t = MPI_Wtime();
+
+      R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
+      R.parseEval(
+          std::string("targets <- setNames(data.frame(matrix(TMP, nrow=" +
+                      std::to_string(chem.getField().GetRequestedVecSize()) +
+                      ")), TMP_PROPS)"));
+      R.parseEval("targets <- targets[ai_surrogate_species]");
+
+      // TODO: Check how to get the correct columns
+      R.parseEval("target_scaled <- preprocess(targets)");
+
+      MSG("AI: incremental training");
+      R.parseEval("model <- training_step(model, predictors_scaled, "
+                  "target_scaled, validity_vector)");
+      double ai_end_t = MPI_Wtime();
+      R["ai_training_time"] = ai_end_t - ai_start_t;
     }
 
-    Rcpp::List profiling;
-    profiling["simtime"] = dSimTime;
-    profiling["chemistry"] = chem_profiling;
-    profiling["diffusion"] = diffusion_profiling;
+    // MPI_Barrier(MPI_COMM_WORLD);
+    double end_t = MPI_Wtime();
+    dSimTime += end_t - start_t;
+    R["totaltime"] = dSimTime;
 
-    chem.MasterLoopBreak();
+    // MDL master_iteration_end just writes on disk state_T and
+    // state_C after every iteration if the cmdline option
+    // --ignore-results is not given (and thus the R variable
+    // store_result is TRUE)
+    call_master_iter_end(R, diffusion.getField(), chem.getField());
 
-    return profiling;
+    // TODO: write checkpoint
+    // checkpoint struct --> field and iteration
+
+    diffusion.getField().update(chem.getField());
+
+    MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
+        std::to_string(maxiter));
+
+    control.applyControlLogic(diffusion, iter);
+    // MSG();
+  } // END SIMULATION LOOP
+
+  std::cout << std::endl;
+
+  Rcpp::List chem_profiling;
+  chem_profiling["simtime"] = chem.GetChemistryTime();
+  chem_profiling["loop"] = chem.GetMasterLoopTime();
+  chem_profiling["sequential"] = chem.GetMasterSequentialTime();
+  chem_profiling["idle_master"] = chem.GetMasterIdleTime();
+  chem_profiling["idle_worker"] = Rcpp::wrap(chem.GetWorkerIdleTimings());
+  chem_profiling["phreeqc_time"] = Rcpp::wrap(chem.GetWorkerPhreeqcTimings());
+
+  Rcpp::List diffusion_profiling;
+  diffusion_profiling["simtime"] = diffusion.getTransportTime();
+
+  if (params.use_dht) {
+    chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
+    chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
+    chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
+    chem_profiling["dht_fill_time"] =
+        Rcpp::wrap(chem.GetWorkerDHTFillTimings());
   }
 
-  static void getControlCellIds(const vector<uint32_t> &ids, int root,
-                                MPI_Comm comm) {
-    std::uint32_t n_ids = 0;
-    int rank;
-    MPI_Comm_rank(comm, &rank);
-    bool is_master = root == rank;
-
-    if (is_master) {
-      n_ids = ids.size();
-    }
-    // broadcast size of id vector
-    MPI_Bcast(n_ids, 1, MPI_UINT32_T, root, comm);
-
-    // worker
-    if (!is_master) {
-      ids.resize(n_ids);
-    }
-    // broadcast control cell ids
-    if (n_ids > 0) {
-      MPI_Bcast(ids.data(), n_ids, MPI_UINT32_T, root, comm);
-    }
+  if (params.use_interp) {
+    chem_profiling["interp_w"] =
+        Rcpp::wrap(chem.GetWorkerInterpolationWriteTimings());
+    chem_profiling["interp_r"] =
+        Rcpp::wrap(chem.GetWorkerInterpolationReadTimings());
+    chem_profiling["interp_g"] =
+        Rcpp::wrap(chem.GetWorkerInterpolationGatherTimings());
+    chem_profiling["interp_fc"] =
+        Rcpp::wrap(chem.GetWorkerInterpolationFunctionCallTimings());
+    chem_profiling["interp_calls"] =
+        Rcpp::wrap(chem.GetWorkerInterpolationCalls());
+    chem_profiling["interp_cached"] = Rcpp::wrap(chem.GetWorkerPHTCacheHits());
   }
 
-  
-  std::vector<std::string> getSpeciesNames(const Field &&field, int root,
-                                           MPI_Comm comm) {
-    std::uint32_t n_elements;
-    std::uint32_t n_string_size;
+  Rcpp::List profiling;
+  profiling["simtime"] = dSimTime;
+  profiling["chemistry"] = chem_profiling;
+  profiling["diffusion"] = diffusion_profiling;
 
-    int rank;
-    MPI_Comm_rank(comm, &rank);
+  chem.MasterLoopBreak();
 
-    const bool is_master = root == rank;
+  return profiling;
+}
 
-    // first, the master sends all the species names iterative
-    if (is_master) {
-      n_elements = field.GetProps().size();
-      MPI_Bcast(&n_elements, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
+static void getControlCellIds(std::vector<std::uint32_t> &ids, int root,
+                              MPI_Comm comm) {
+  std::uint32_t n_ids = 0;
+  int rank;
+  MPI_Comm_rank(comm, &rank);
+  bool is_master = root == rank;
 
-      for (std::uint32_t i = 0; i < n_elements; i++) {
-        n_string_size = field.GetProps()[i].size();
-        MPI_Bcast(&n_string_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
-        MPI_Bcast(const_cast<char *>(field.GetProps()[i].c_str()),
-                  n_string_size, MPI_CHAR, root, MPI_COMM_WORLD);
-      }
+  if (is_master) {
+    n_ids = ids.size();
+  }
+  // broadcast size of id vector
+  MPI_Bcast(&n_ids, 1, MPI_UINT32_T, root, comm);
 
-      return field.GetProps();
-    }
+  // worker
+  if (!is_master) {
+    ids.resize(n_ids);
+  }
+  // broadcast control cell ids
+  if (n_ids > 0) {
+    MPI_Bcast(ids.data(), n_ids, MPI_UINT32_T, root, comm);
+  }
+}
 
-    // now all the worker stuff
-    MPI_Bcast(&n_elements, 1, MPI_UINT32_T, root, comm);
+std::vector<std::string> getSpeciesNames(const Field &&field, int root,
+                                         MPI_Comm comm) {
+  std::uint32_t n_elements;
+  std::uint32_t n_string_size;
 
-    std::vector<std::string> species_names_out(n_elements);
+  int rank;
+  MPI_Comm_rank(comm, &rank);
+
+  const bool is_master = root == rank;
+
+  // first, the master sends all the species names iterative
+  if (is_master) {
+    n_elements = field.GetProps().size();
+    MPI_Bcast(&n_elements, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
 
     for (std::uint32_t i = 0; i < n_elements; i++) {
+      n_string_size = field.GetProps()[i].size();
       MPI_Bcast(&n_string_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
-
-      char recv_buf[n_string_size];
-
-      MPI_Bcast(recv_buf, n_string_size, MPI_CHAR, root, MPI_COMM_WORLD);
-
-      species_names_out[i] = std::string(recv_buf, n_string_size);
+      MPI_Bcast(const_cast<char *>(field.GetProps()[i].c_str()), n_string_size,
+                MPI_CHAR, root, MPI_COMM_WORLD);
     }
 
-    return species_names_out;
+    return field.GetProps();
   }
 
-  std::array<double, 2> getBaseTotals(Field && field, int root, MPI_Comm comm) {
-    std::array<double, 2> base_totals;
+  // now all the worker stuff
+  MPI_Bcast(&n_elements, 1, MPI_UINT32_T, root, comm);
 
-    int rank;
-    MPI_Comm_rank(comm, &rank);
+  std::vector<std::string> species_names_out(n_elements);
 
-    const bool is_master = root == rank;
+  for (std::uint32_t i = 0; i < n_elements; i++) {
+    MPI_Bcast(&n_string_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
 
-    if (is_master) {
-      const auto h_col = field["H"];
-      const auto o_col = field["O"];
+    char recv_buf[n_string_size];
 
-      base_totals[0] = *std::min_element(h_col.begin(), h_col.end());
-      base_totals[1] = *std::min_element(o_col.begin(), o_col.end());
-      MPI_Bcast(base_totals.data(), 2, MPI_DOUBLE, root, MPI_COMM_WORLD);
-      return base_totals;
-    }
+    MPI_Bcast(recv_buf, n_string_size, MPI_CHAR, root, MPI_COMM_WORLD);
 
-    MPI_Bcast(base_totals.data(), 2, MPI_DOUBLE, root, comm);
+    species_names_out[i] = std::string(recv_buf, n_string_size);
+  }
 
+  return species_names_out;
+}
+
+std::array<double, 2> getBaseTotals(Field &&field, int root, MPI_Comm comm) {
+  std::array<double, 2> base_totals;
+
+  int rank;
+  MPI_Comm_rank(comm, &rank);
+
+  const bool is_master = root == rank;
+
+  if (is_master) {
+    const auto h_col = field["H"];
+    const auto o_col = field["O"];
+
+    base_totals[0] = *std::min_element(h_col.begin(), h_col.end());
+    base_totals[1] = *std::min_element(o_col.begin(), o_col.end());
+    MPI_Bcast(base_totals.data(), 2, MPI_DOUBLE, root, MPI_COMM_WORLD);
     return base_totals;
   }
 
-  bool getHasID(Field && field, int root, MPI_Comm comm) {
-    bool has_id;
+  MPI_Bcast(base_totals.data(), 2, MPI_DOUBLE, root, comm);
 
-    int rank;
-    MPI_Comm_rank(comm, &rank);
+  return base_totals;
+}
 
-    const bool is_master = root == rank;
+bool getHasID(Field &&field, int root, MPI_Comm comm) {
+  bool has_id;
 
-    if (is_master) {
-      const auto ID_field = field["ID"];
+  int rank;
+  MPI_Comm_rank(comm, &rank);
 
-      std::set<double> unique_IDs(ID_field.begin(), ID_field.end());
+  const bool is_master = root == rank;
 
-      has_id = unique_IDs.size() > 1;
+  if (is_master) {
+    const auto ID_field = field["ID"];
 
-      MPI_Bcast(&has_id, 1, MPI_C_BOOL, root, MPI_COMM_WORLD);
+    std::set<double> unique_IDs(ID_field.begin(), ID_field.end());
 
-      return has_id;
-    }
+    has_id = unique_IDs.size() > 1;
 
-    MPI_Bcast(&has_id, 1, MPI_C_BOOL, root, comm);
+    MPI_Bcast(&has_id, 1, MPI_C_BOOL, root, MPI_COMM_WORLD);
 
     return has_id;
   }
 
-  int main(int argc, char *argv[]) {
-    int world_size;
+  MPI_Bcast(&has_id, 1, MPI_C_BOOL, root, comm);
 
-    MPI_Init(&argc, &argv);
+  return has_id;
+}
 
-    {
-      MPI_Comm_size(MPI_COMM_WORLD, &world_size);
-      MPI_Comm_rank(MPI_COMM_WORLD, &MY_RANK);
+int main(int argc, char *argv[]) {
+  int world_size;
 
-      RInsidePOET &R = RInsidePOET::getInstance();
+  MPI_Init(&argc, &argv);
 
-      if (MY_RANK == 0) {
-        MSG("Running POET version " + std::string(poet_version));
-      }
+  {
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &MY_RANK);
 
-      init_global_functions(R);
-
-      RuntimeParameters run_params;
-
-      if (parseInitValues(argc, argv, run_params) != 0) {
-        MPI_Finalize();
-        return 0;
-      }
-
-      // switch (parseInitValues(argc, argv, run_params)) {
-      // case ParseRet::PARSER_ERROR:
-      // case ParseRet::PARSER_HELP:
-      //   MPI_Finalize();
-      //   return 0;
-      // case ParseRet::PARSER_OK:
-      //   break;
-      // }
-
-      InitialList init_list(R);
-      init_list.importList(run_params.init_params, MY_RANK != 0);
-
-      MSG("RInside initialized on process " + std::to_string(MY_RANK));
-
-      std::cout << std::flush;
-
-      MPI_Barrier(MPI_COMM_WORLD);
-
-      ChemistryModule chemistry(run_params.work_package_size,
-                                init_list.getChemistryInit(), MPI_COMM_WORLD);
-      ControlModule control;
-      chemistry.SetControlModule(&control);
-      control.setChemistryModule(&chemistry);
-
-      const ChemistryModule::SurrogateSetup surr_setup = {
-          getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-          getBaseTotals(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-          getHasID(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-          run_params.use_dht,
-          run_params.dht_size,
-          run_params.dht_snaps,
-          run_params.out_dir,
-          run_params.use_interp,
-          run_params.interp_bucket_entries,
-          run_params.interp_size,
-          run_params.interp_min_entries,
-          run_params.use_ai_surrogate};
-
-      chemistry.masterEnableSurrogates(surr_setup);
-
-      const ControlModule::ControlSetup ctrl_setup = {
-          run_params.out_dir, // added
-          run_params.checkpoint_interval, run_params.control_interval,
-          getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-          run_params.mape_threshold};
-
-      control.enableControlLogic(ctrl_setup);
-
-      if (MY_RANK > 0) {
-        chemistry.WorkerLoop();
-      } else {
-        // R.parseEvalQ("mysetup <- setup");
-        // // if (MY_RANK == 0) { // get timestep vector from
-        // // grid_init function ... //
-
-        *global_rt_setup = master_init_R(*global_rt_setup, run_params.out_dir,
-                                         init_list.getInitialGrid().asSEXP());
-
-        // MDL: store all parameters
-        // MSG("Calling R Function to store calling parameters");
-        // R.parseEvalQ("StoreSetup(setup=mysetup)");
-        R["out_ext"] = run_params.out_ext;
-        R["out_dir"] = run_params.out_dir;
-
-        if (run_params.use_ai_surrogate) {
-          /* Incorporate ai surrogate from R */
-          R.parseEvalQ(ai_surrogate_r_library);
-          /* Use dht species for model input and output */
-          R["ai_surrogate_species"] =
-              init_list.getChemistryInit().dht_species.getNames();
-
-          const std::string ai_surrogate_input_script =
-              init_list.getChemistryInit().ai_surrogate_input_script;
-
-          MSG("AI: sourcing user-provided script");
-          R.parseEvalQ(ai_surrogate_input_script);
-
-          MSG("AI: initialize AI model");
-          R.parseEval("model <- initiate_model()");
-          R.parseEval("gpu_info()");
-        }
-
-        MSG("Init done on process with rank " + std::to_string(MY_RANK));
-
-        // MPI_Barrier(MPI_COMM_WORLD);
-
-        DiffusionModule diffusion(init_list.getDiffusionInit(),
-                                  init_list.getInitialGrid());
-
-        chemistry.masterSetField(init_list.getInitialGrid());
-
-        Rcpp::List profiling =
-            RunMasterLoop(R, run_params, diffusion, chemistry, control);
-
-        MSG("finished simulation loop");
-
-        R["profiling"] = profiling;
-        R["setup"] = *global_rt_setup;
-        R["setup$out_ext"] = run_params.out_ext;
-
-        std::string r_vis_code;
-        r_vis_code = "SaveRObj(x = profiling, path = paste0(out_dir, "
-                     "'/timings.', setup$out_ext));";
-        R.parseEval(r_vis_code);
-
-        MSG("Done! Results are stored as R objects into <" +
-            run_params.out_dir + "/timings." + run_params.out_ext);
-      }
-    }
-
-    MSG("finished, cleanup of process " + std::to_string(MY_RANK));
-
-    MPI_Finalize();
+    RInsidePOET &R = RInsidePOET::getInstance();
 
     if (MY_RANK == 0) {
-      MSG("done, bye!");
+      MSG("Running POET version " + std::string(poet_version));
     }
 
-    exit(0);
+    init_global_functions(R);
+
+    RuntimeParameters run_params;
+
+    if (parseInitValues(argc, argv, run_params) != 0) {
+      MPI_Finalize();
+      return 0;
+    }
+
+    // switch (parseInitValues(argc, argv, run_params)) {
+    // case ParseRet::PARSER_ERROR:
+    // case ParseRet::PARSER_HELP:
+    //   MPI_Finalize();
+    //   return 0;
+    // case ParseRet::PARSER_OK:
+    //   break;
+    // }
+
+    InitialList init_list(R);
+    init_list.importList(run_params.init_params, MY_RANK != 0);
+
+    MSG("RInside initialized on process " + std::to_string(MY_RANK));
+
+    std::cout << std::flush;
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    ChemistryModule chemistry(run_params.work_package_size,
+                              init_list.getChemistryInit(), MPI_COMM_WORLD);
+    ControlModule control;
+    chemistry.SetControlModule(&control);
+    control.setChemistryModule(&chemistry);
+
+    const ChemistryModule::SurrogateSetup surr_setup = {
+        getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
+        getBaseTotals(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
+        getHasID(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
+        run_params.use_dht,
+        run_params.dht_size,
+        run_params.dht_snaps,
+        run_params.out_dir,
+        run_params.use_interp,
+        run_params.interp_bucket_entries,
+        run_params.interp_size,
+        run_params.interp_min_entries,
+        run_params.use_ai_surrogate};
+
+    chemistry.masterEnableSurrogates(surr_setup);
+
+    /* broadcast control cell ids before simulation starts */
+    getControlCellIds(run_params.ctrl_cell_ids, 0, MPI_COMM_WORLD);
+    chemistry.SetControlCellIds(run_params.ctrl_cell_ids);
+
+    const ControlModule::ControlSetup ctrl_setup = {
+        run_params.out_dir, // added
+        run_params.checkpoint_interval,
+        getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
+        run_params.mape_threshold};
+
+    control.enableControlLogic(ctrl_setup);
+
+    if (MY_RANK > 0) {
+      chemistry.WorkerLoop();
+    } else {
+      // R.parseEvalQ("mysetup <- setup");
+      // // if (MY_RANK == 0) { // get timestep vector from
+      // // grid_init function ... //
+
+      *global_rt_setup = master_init_R(*global_rt_setup, run_params.out_dir,
+                                       init_list.getInitialGrid().asSEXP());
+
+      // MDL: store all parameters
+      // MSG("Calling R Function to store calling parameters");
+      // R.parseEvalQ("StoreSetup(setup=mysetup)");
+      R["out_ext"] = run_params.out_ext;
+      R["out_dir"] = run_params.out_dir;
+
+      if (run_params.use_ai_surrogate) {
+        /* Incorporate ai surrogate from R */
+        R.parseEvalQ(ai_surrogate_r_library);
+        /* Use dht species for model input and output */
+        R["ai_surrogate_species"] =
+            init_list.getChemistryInit().dht_species.getNames();
+
+        const std::string ai_surrogate_input_script =
+            init_list.getChemistryInit().ai_surrogate_input_script;
+
+        MSG("AI: sourcing user-provided script");
+        R.parseEvalQ(ai_surrogate_input_script);
+
+        MSG("AI: initialize AI model");
+        R.parseEval("model <- initiate_model()");
+        R.parseEval("gpu_info()");
+      }
+
+      MSG("Init done on process with rank " + std::to_string(MY_RANK));
+
+      // MPI_Barrier(MPI_COMM_WORLD);
+
+      DiffusionModule diffusion(init_list.getDiffusionInit(),
+                                init_list.getInitialGrid());
+
+      chemistry.masterSetField(init_list.getInitialGrid());
+
+      Rcpp::List profiling =
+          RunMasterLoop(R, run_params, diffusion, chemistry, control);
+
+      MSG("finished simulation loop");
+
+      R["profiling"] = profiling;
+      R["setup"] = *global_rt_setup;
+      R["setup$out_ext"] = run_params.out_ext;
+
+      std::string r_vis_code;
+      r_vis_code = "SaveRObj(x = profiling, path = paste0(out_dir, "
+                   "'/timings.', setup$out_ext));";
+      R.parseEval(r_vis_code);
+
+      MSG("Done! Results are stored as R objects into <" + run_params.out_dir +
+          "/timings." + run_params.out_ext);
+    }
   }
+
+  MSG("finished, cleanup of process " + std::to_string(MY_RANK));
+
+  MPI_Finalize();
+
+  if (MY_RANK == 0) {
+    MSG("done, bye!");
+  }
+
+  exit(0);
+}

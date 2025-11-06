@@ -341,43 +341,39 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
       MPI_Get_count(&probe_status, MPI_DOUBLE, &size);
       MPI_Recv(w_list[p - 1].send_addr, size, MPI_DOUBLE, p, LOOP_WORK,
                this->group_comm, MPI_STATUS_IGNORE);
-      handled = true;
+      // Only LOOP_WORK completes a work package
+      w_list[p - 1].has_work = 0;
+      pkg_to_recv -= 1;
+      free_workers++;
       break;
     }
     case LOOP_CTRL: {
       recv_ctrl_a = MPI_Wtime();
-      /* layout of buffer is [phreeqc][surrogate] */
+
       MPI_Get_count(&probe_status, MPI_DOUBLE, &size);
       recv_buffer.resize(size);
       MPI_Recv(recv_buffer.data(), size, MPI_DOUBLE, p, LOOP_CTRL,
                this->group_comm, MPI_STATUS_IGNORE);
 
-      int half = size / 2;
-      std::copy(recv_buffer.begin(), recv_buffer.begin() + half,
-                w_list[p - 1].send_addr);
-
-      /*
-      if (w_list[p - 1].surrogate_addr == nullptr) {
-      throw std::runtime_error("MasterRecvPkgs: surrogate_addr is null");
-      }*/
-
-      std::copy(recv_buffer.begin() + (size / 2), recv_buffer.begin() + size,
-                w_list[p - 1].surrogate_addr);
       recv_ctrl_b = MPI_Wtime();
       recv_ctrl_t += recv_ctrl_b - recv_ctrl_a;
 
-      handled = true;
+      // Collect PHREEQC rows for control cells
+      const std::size_t cells_per_batch =
+          static_cast<std::size_t>(size) /
+          static_cast<std::size_t>(this->prop_count);
+      for (std::size_t i = 0; i < cells_per_batch; i++) {
+        std::vector<double> cell_output(
+            recv_buffer.begin() + this->prop_count * i,
+            recv_buffer.begin() + this->prop_count * (i + 1));
+        this->control_batch.push_back(std::move(cell_output));
+      }
       break;
     }
     default: {
       throw std::runtime_error("Master received unknown MPI tag: " +
                                std::to_string(probe_status.MPI_TAG));
     }
-    }
-    if (handled) {
-      w_list[p - 1].has_work = 0;
-      pkg_to_recv -= 1;
-      free_workers++;
     }
   }
 }
@@ -450,11 +446,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
   MPI_Barrier(this->group_comm);
 
-  this->control_enabled = this->control_module->getControlIntervalEnabled();
-  if (this->control_enabled) {
-    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
-  }
-
   static uint32_t iteration = 0;
 
   /* start time measurement of sequential part */
@@ -466,16 +457,14 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  //this->mpi_surr_buffer.resize(mpi_buffer.size());
+  // this->mpi_surr_buffer.resize(mpi_buffer.size());
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
   pkg_to_recv = wp_sizes_vector.size();
 
   workpointer_t work_pointer = mpi_buffer.begin();
-  workpointer_t sur_pointer = this->mpi_surr_buffer.begin();
-  //(this->control_enabled ? this->mpi_surr_buffer.begin()
-  //                     : mpi_buffer.end());
+  workpointer_t sur_pointer = mpi_buffer.begin();
   worker_list_t worker_list(this->comm_size - 1);
 
   free_workers = this->comm_size - 1;
@@ -523,28 +512,36 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-  if (this->control_enabled) {
-    std::cout << "[Master] Control logic enabled for this iteration."
-              << std::endl;
-    std::vector<double> sur_unshuffled{mpi_surr_buffer};
+  if (!this->control_batch.empty()) {
+    std::cout << "[Master] Processing " << this->control_batch.size()
+              << " control cells for comparison." << std::endl;
 
-    shuf_a = MPI_Wtime();
-    unshuffleField(this->mpi_surr_buffer, this->n_cells, this->prop_count,
-                   wp_sizes_vector.size(), sur_unshuffled);
-    shuf_b = MPI_Wtime();
-    this->shuf_t += shuf_b - shuf_a;
+    /* using mpi-buffer because we need cell-major layout*/
+    std::vector<std::vector<double>> surrogate_batch;
+    surrogate_batch.reserve(this->control_batch.size());
 
-    size_t N = out_vec.size();
-    if (N != sur_unshuffled.size()) {
-      std::cerr << "[MASTER DBG] size mismatch out_vec=" << N
-                << " sur_unshuffled=" << sur_unshuffled.size() << std::endl;
+        for (const auto &element : this->control_batch) {
+
+      for (size_t i = 0; i < this->n_cells; i++) {
+        uint32_t curr_cell_id = mpi_buffer[this->prop_count * i];
+
+        if (curr_cell_id == element[0]) {
+          std::vector<double> surrogate_output(
+              mpi_buffer.begin() + this->prop_count * i,
+              mpi_buffer.begin() + this->prop_count * (i + 1));
+          surrogate_batch.push_back(surrogate_output);
+          break;
+        }
+      }
     }
 
     metrics_a = MPI_Wtime();
-    control_module->computeSpeciesErrorMetrics(out_vec, sur_unshuffled,
-                                               this->n_cells);
+    control_module->computeSpeciesErrorMetrics(this->control_batch, surrogate_batch, 1);
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
+
+    // Clear for next control iteration
+    this->control_batch.clear();
   }
 
   /* start time measurement of master chemistry */

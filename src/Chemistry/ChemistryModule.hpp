@@ -18,6 +18,7 @@
 #include <memory>
 #include <mpi.h>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace poet {
@@ -259,13 +260,17 @@ public:
 
   void SetControlModule(poet::ControlModule *ctrl) { control_module = ctrl; }
 
-  void SetDhtEnabled(bool enabled) { dht_enabled = enabled; }
-  bool GetDhtEnabled() const { return dht_enabled; }
+  void SetDhtEnabled(bool enabled) { this->dht_enabled = enabled; }
+  bool GetDhtEnabled() const { return this->dht_enabled; }
 
-  void SetInterpEnabled(bool enabled) { interp_enabled = enabled; }
+  void SetInterpEnabled(bool enabled) { this->interp_enabled = enabled; }
   bool GetInterpEnabled() const { return interp_enabled; }
 
-  void SetWarmupEnabled(bool enabled) { warmup_enabled = enabled; }
+  void SetWarmupEnabled(bool enabled) { this->warmup_enabled = enabled; }
+
+  void SetControlCellIds(const std::vector<uint32_t> &ids) {
+    this->ctrl_cell_ids = std::unordered_set<uint32_t>(ids.begin(), ids.end());
+  }
 
 protected:
   void initializeDHT(uint32_t size_mb,
@@ -280,13 +285,13 @@ protected:
 
   enum {
     CHEM_FIELD_INIT,
-    //CHEM_DHT_ENABLE,
+    // CHEM_DHT_ENABLE,
     CHEM_DHT_SIGNIF_VEC,
     CHEM_DHT_SNAPS,
     CHEM_DHT_READ_FILE,
-    //CHEM_WARMUP_PHASE,  // Control flag
-    //CHEM_CTRL_ENABLE, // Control flag
-    //CHEM_IP_ENABLE,
+    // CHEM_WARMUP_PHASE,  // Control flag
+    // CHEM_CTRL_ENABLE, // Control flag
+    // CHEM_IP_ENABLE,
     CHEM_IP_MIN_ENTRIES,
     CHEM_IP_SIGNIF_VEC,
     CHEM_WORK_LOOP,
@@ -323,6 +328,7 @@ protected:
     double dht_fill = 0.;
     double idle_t = 0.;
     double ctrl_t = 0.;
+    double ctrl_phreeqc_t = 0.;
   };
 
   struct worker_info_s {
@@ -363,6 +369,10 @@ protected:
 
   void WorkerRunWorkPackage(WorkPackage &work_package, double dSimTime,
                             double dTimestep);
+
+  void ProcessControlWorkPackage(std::vector<std::vector<double>> &input,
+                                 double current_sim_time, double dt,
+                                 struct worker_s &timings);
 
   std::vector<uint32_t> CalculateWPSizesVector(uint32_t n_cells,
                                                uint32_t wp_size) const;
@@ -444,7 +454,8 @@ protected:
   bool control_enabled{false};
   bool warmup_enabled{false};
 
-  // std::vector<double> sur_shuffled;
+  std::unordered_set<uint32_t> ctrl_cell_ids;
+  std::vector<std::vector<double>> control_batch;
 };
 } // namespace poet
 

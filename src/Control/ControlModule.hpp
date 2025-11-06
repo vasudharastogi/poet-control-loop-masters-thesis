@@ -3,6 +3,7 @@
 
 #include "Base/Macros.hpp"
 #include "Chemistry/ChemistryModule.hpp"
+#include "Transport/DiffusionModule.hpp"
 #include "poet.hpp"
 
 #include <cstdint>
@@ -12,6 +13,7 @@
 namespace poet {
 
 class ChemistryModule;
+class DiffusionModule;
 
 class ControlModule {
 
@@ -27,7 +29,7 @@ public:
 
   void initiateWarmupPhase(bool dht_enabled, bool interp_enabled);
 
-  bool checkAndRollback(ChemistryModule &chem, uint32_t &iter);
+  bool checkAndRollback(DiffusionModule &diffusion, uint32_t &iter);
 
   struct SpeciesErrorMetrics {
     std::vector<double> mape;
@@ -40,16 +42,16 @@ public:
           rollback_count(counter) {}
   };
 
-  void computeSpeciesErrorMetrics(const std::vector<double> &reference_values,
-                                  const std::vector<double> &surrogate_values,
-                                  const uint32_t size_per_prop);
+  void computeSpeciesErrorMetrics(
+      std::vector<std::vector<double>> &reference_values,
+      std::vector<std::vector<double>> &surrogate_values,
+      const uint32_t size_per_prop);
 
   std::vector<SpeciesErrorMetrics> metricsHistory;
 
   struct ControlSetup {
     std::string out_dir;
     std::uint32_t checkpoint_interval;
-    std::uint32_t control_interval;
     std::vector<std::string> species_names;
     std::vector<double> mape_threshold;
     std::vector<uint32_t> ctrl_cell_ids;
@@ -58,25 +60,18 @@ public:
   void enableControlLogic(const ControlSetup &setup) {
     this->out_dir = setup.out_dir;
     this->checkpoint_interval = setup.checkpoint_interval;
-    this->control_interval = setup.control_interval;
     this->species_names = setup.species_names;
     this->mape_threshold = setup.mape_threshold;
     this->ctrl_cell_ids = setup.ctrl_cell_ids;
   }
 
-  bool getControlIntervalEnabled() const {
-    return this->control_interval_enabled;
-  }
+  void applyControlLogic(DiffusionModule &diffusion, uint32_t &iter);
 
-  void applyControlLogic(ChemistryModule &chem, uint32_t &iter);
-
-  void writeCheckpointAndMetrics(ChemistryModule &chem, uint32_t iter);
+  void writeCheckpointAndMetrics(DiffusionModule &diffusion, uint32_t iter);
 
   auto getGlobalIteration() const noexcept { return global_iteration; }
 
   void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
-
-  auto getControlInterval() const { return this->control_interval; }
 
   std::vector<double> getMapeThreshold() const { return this->mape_threshold; }
 
@@ -94,12 +89,11 @@ public:
 
 private:
   bool rollback_enabled = false;
-  bool control_interval_enabled = false;
 
   poet::ChemistryModule *chem = nullptr;
 
+  std::uint32_t penalty_interval = 50;
   std::uint32_t checkpoint_interval = 0;
-  std::uint32_t control_interval = 0;
   std::uint32_t global_iteration = 0;
   std::uint32_t rollback_count = 0;
   std::uint32_t sur_disabled_counter = 0;
