@@ -439,13 +439,13 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
       Rcpp::wrap(chem.GetWorkerControlTimings());
       
 
-  if (params.use_dht) {
+  //if (params.use_dht) {
     chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
     chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
     chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
     chem_profiling["dht_fill_time"] =
         Rcpp::wrap(chem.GetWorkerDHTFillTimings());
-  }
+  //}
 
   if (params.use_interp) {
     chem_profiling["interp_w"] =
