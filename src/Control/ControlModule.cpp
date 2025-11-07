@@ -56,10 +56,9 @@ void poet::ControlModule::applyControlLogic(DiffusionModule &diffusion,
     rollback_enabled = true;
     rollback_count++;
     sur_disabled_counter = penalty_interval;
-    
+
     MSG("Interpolation disabled for the next " +
         std::to_string(penalty_interval) + ".");
-    
   }
 }
 
@@ -138,16 +137,14 @@ void poet::ControlModule::computeSpeciesErrorMetrics(
     return;
   }
 
-  // Loop over species (rows in the data structure)
-  for (size_t species_idx = 0; species_idx < reference_values.size(); species_idx++) {
+  for (size_t row = 0; row < reference_values.size(); row++) {
     double err_sum = 0.0;
     double sqr_err_sum = 0.0;
     uint32_t count = 0;
 
-    // Loop over control cells (columns in the data structure)
-    for (size_t cell_idx = 0; cell_idx < size_per_prop; cell_idx++) {
-      const double ref_value = reference_values[species_idx][cell_idx];
-      const double sur_value = surrogate_values[species_idx][cell_idx];
+    for (size_t col = 0; col < this->species_names.size(); col++) {
+      const double ref_value = reference_values[row][col];
+      const double sur_value = surrogate_values[row][col];
       const double ZERO_ABS = 1e-13;
 
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
@@ -160,26 +157,22 @@ void poet::ControlModule::computeSpeciesErrorMetrics(
           sqr_err_sum += 1.0;
           count++;
         }
-        // Both zero: skip (don't increment count)
-      }
-      else {
+        // Both zero: skip
+      } else {
         double alpha = 1.0 - (sur_value / ref_value);
         err_sum += std::abs(alpha);
         sqr_err_sum += alpha * alpha;
         count++;
       }
+      // Store metrics for this species after processing all cells
+      if (count > 0) {
+        metrics.mape[col] = 100.0 * (err_sum / size_per_prop);
+        metrics.rrmse[col] = std::sqrt(sqr_err_sum / size_per_prop);
+      } else {
+        metrics.mape[col] = 0.0;
+        metrics.rrmse[col] = 0.0;
+      }
     }
-
-    // Store metrics for this species after processing all cells
-    if (count > 0) {
-      metrics.mape[species_idx] = 100.0 * (err_sum / size_per_prop);
-      metrics.rrmse[species_idx] = std::sqrt(sqr_err_sum / size_per_prop);
-    } else {
-      metrics.mape[species_idx] = 0.0;
-      metrics.rrmse[species_idx] = 0.0;
-    }
+    metricsHistory.push_back(metrics);
   }
-
-  // Push metrics to history once after processing all species
-  metricsHistory.push_back(metrics);
 }

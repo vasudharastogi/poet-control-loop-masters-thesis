@@ -76,7 +76,7 @@ void InterpolationModule::tryInterpolation(WorkPackage &work_package) {
   const auto dht_results = this->dht_instance.getDHTResults();
 
   for (int wp_i = 0; wp_i < work_package.size; wp_i++) {
-    if (work_package.input[wp_i][0] != 2) {
+    if (work_package.input[wp_i][1] != 2) {
       interp_result.status[wp_i] = INSUFFICIENT_DATA;
       continue;
     }
@@ -122,7 +122,7 @@ void InterpolationModule::tryInterpolation(WorkPackage &work_package) {
     this->pht->incrementReadCounter(roundKey(rounded_key));
 #endif
 
-    const int cell_id = static_cast<int>(work_package.input[wp_i][0]);
+    const int cell_id = static_cast<int>(work_package.input[wp_i][1]);
 
     if (!to_calc_cache.contains(cell_id)) {
       const std::vector<std::int32_t> &to_calc = dht_instance.getKeyElements();

@@ -133,6 +133,8 @@ void poet::ChemistryModule::ProcessControlWorkPackage(
   WorkerRunWorkPackage(control_wp, current_sim_time, dt);
   phreeqc_end = MPI_Wtime();
 
+  std::cout << "PQC RAN" << std::endl;
+
   timings.ctrl_phreeqc_t += phreeqc_end - phreeqc_start;
 
   for (std::size_t wp_i = 0; wp_i < control_wp.size; wp_i++) {
@@ -240,8 +242,11 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     uint32_t cell_id = s_curr_wp.input[wp_i][0];
-    if (this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end() &&
-        s_curr_wp.mapping[wp_i] != CHEM_PQC) {
+    
+    bool is_control_cell = this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end();
+    bool used_surrogate = s_curr_wp.mapping[wp_i] != CHEM_PQC;
+    
+    if (is_control_cell && used_surrogate) {
 
       control_batch.push_back(s_curr_wp.input[wp_i]);
       control_cells_processed++;

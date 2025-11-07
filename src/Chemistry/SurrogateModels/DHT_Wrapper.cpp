@@ -133,7 +133,7 @@ void DHT_Wrapper::fillDHT(const WorkPackage &work_package) {
       continue;
     }
 
-    if (work_package.input[i][0] != 2) {
+    if (work_package.input[i][1] != 2) {
       continue;
     }
 

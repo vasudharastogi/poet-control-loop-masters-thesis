@@ -520,7 +520,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     std::vector<std::vector<double>> surrogate_batch;
     surrogate_batch.reserve(this->control_batch.size());
 
-        for (const auto &element : this->control_batch) {
+    for (const auto &element : this->control_batch) {
 
       for (size_t i = 0; i < this->n_cells; i++) {
         uint32_t curr_cell_id = mpi_buffer[this->prop_count * i];
@@ -536,7 +536,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     }
 
     metrics_a = MPI_Wtime();
-    control_module->computeSpeciesErrorMetrics(this->control_batch, surrogate_batch, 1);
+    control_module->computeSpeciesErrorMetrics(this->control_batch,
+                                               surrogate_batch, 1);
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
 
