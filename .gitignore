@@ -156,6 +156,7 @@ include/
 !bin/barite_fgcs_2.qs2
 !bin/barite_fgcs_2.R
 !bin/dolo_output
+!bin/plot
 !bin/dolo_fgcs_3.qs2
 !bin/dolo_fgcs_3.R
 !bin/dolo_fgcs.pqi
