@@ -162,4 +162,4 @@ include/
 !bin/dolo_fgcs_3.R
 !bin/dolo_fgcs_3.pqi
 !bin/phreeqc_kin.dat
-!bin/run_poet.sh
+!bin/run_poet.shbin/dolo/
