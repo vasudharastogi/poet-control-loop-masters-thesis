@@ -153,7 +153,6 @@ include/
 
 # But keep these specific files
 !bin/plot/
-!bin/dolo/
 !bin/barite_fgcs_3.pqi
 !bin/barite_fgcs_4_rt.R
 !bin/barite_fgcs_4.R
