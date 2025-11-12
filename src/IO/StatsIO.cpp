@@ -21,27 +21,36 @@ namespace poet
             return;
         }
 
-        // header
-        out << std::left << std::setw(15) << "Iteration"
+        // header: CellID, Iteration, Rollback, Species, MAPE, RRMSE
+        out << std::left << std::setw(15) << "CellID"
+            << std::setw(15) << "Iteration"
             << std::setw(15) << "Rollback"
             << std::setw(15) << "Species"
             << std::setw(15) << "MAPE"
-            << std::setw(15) << "RRSME" << "\n";
+            << std::setw(15) << "RRMSE" << "\n";
 
-        out << std::string(75, '-') << "\n"; 
+        out << std::string(90, '-') << "\n"; 
 
-        // data rows
-        for (size_t i = 0; i < all_stats.size(); ++i)
+        // data rows: iterate over iterations
+        for (size_t iter_idx = 0; iter_idx < all_stats.size(); ++iter_idx)
         {
-            for (size_t j = 0; j < species_names.size(); ++j)
+            const auto &metrics = all_stats[iter_idx];
+            
+            // Iterate over cells
+            for (size_t cell_idx = 0; cell_idx < metrics.id.size(); ++cell_idx)
             {
-                out << std::left
-                    << std::setw(15) << all_stats[i].iteration
-                    << std::setw(15) << all_stats[i].rollback_count
-                    << std::setw(15) << species_names[j]
-                    << std::setw(15) << all_stats[i].mape[j]
-                    << std::setw(15) << all_stats[i].rrmse[j]
-                    << "\n";
+                // Iterate over species for this cell
+                for (size_t species_idx = 0; species_idx < species_names.size(); ++species_idx)
+                {
+                    out << std::left
+                        << std::setw(15) << metrics.id[cell_idx]
+                        << std::setw(15) << metrics.iteration
+                        << std::setw(15) << metrics.rollback_count
+                        << std::setw(15) << species_names[species_idx]
+                        << std::setw(15) << metrics.mape[cell_idx][species_idx]
+                        << std::setw(15) << metrics.rrmse[cell_idx][species_idx]
+                        << "\n";
+                }
             }
             out << "\n"; 
         }

@@ -537,7 +537,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
     metrics_a = MPI_Wtime();
     control_module->computeSpeciesErrorMetrics(this->control_batch,
-                                               surrogate_batch, 1);
+                                               surrogate_batch);
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
 

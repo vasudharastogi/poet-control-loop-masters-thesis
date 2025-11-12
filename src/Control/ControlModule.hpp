@@ -32,26 +32,30 @@ public:
   bool checkAndRollback(DiffusionModule &diffusion, uint32_t &iter);
 
   struct SpeciesErrorMetrics {
-    std::vector<double> mape;
-    std::vector<double> rrmse;
+    std::vector<std::uint32_t> id;
+    std::vector<std::vector<double>> mape;
+    std::vector<std::vector<double>> rrmse;
     uint32_t iteration; // iterations in simulation after rollbacks
     uint32_t rollback_count;
 
-    SpeciesErrorMetrics(uint32_t species_count, uint32_t iter, uint32_t counter)
-        : mape(species_count, 0.0), rrmse(species_count, 0.0), iteration(iter),
-          rollback_count(counter) {}
+    SpeciesErrorMetrics(uint32_t num_cells, uint32_t species_count,
+                        uint32_t iter, uint32_t counter)
+        : mape(num_cells, std::vector<double>(species_count, 0.0)),
+          rrmse(num_cells, std::vector<double>(species_count, 0.0)),
+          iteration(iter), rollback_count(counter) {}
   };
 
   void computeSpeciesErrorMetrics(
       std::vector<std::vector<double>> &reference_values,
-      std::vector<std::vector<double>> &surrogate_values,
-      const uint32_t size_per_prop);
+      std::vector<std::vector<double>> &surrogate_values);
 
   std::vector<SpeciesErrorMetrics> metricsHistory;
 
   struct ControlSetup {
     std::string out_dir;
     std::uint32_t checkpoint_interval;
+    std::uint32_t penalty_interval;
+    std::uint32_t stabilization_interval;
     std::vector<std::string> species_names;
     std::vector<double> mape_threshold;
     std::vector<uint32_t> ctrl_cell_ids;
@@ -60,6 +64,7 @@ public:
   void enableControlLogic(const ControlSetup &setup) {
     this->out_dir = setup.out_dir;
     this->checkpoint_interval = setup.checkpoint_interval;
+    this->stabilization_interval = setup.stabilization_interval;
     this->species_names = setup.species_names;
     this->mape_threshold = setup.mape_threshold;
     this->ctrl_cell_ids = setup.ctrl_cell_ids;
@@ -92,7 +97,8 @@ private:
 
   poet::ChemistryModule *chem = nullptr;
 
-  std::uint32_t penalty_interval = 50;
+  std::uint32_t stabilization_interval = 0;
+  std::uint32_t penalty_interval = 0;
   std::uint32_t checkpoint_interval = 0;
   std::uint32_t global_iteration = 0;
   std::uint32_t rollback_count = 0;

@@ -152,13 +152,13 @@ lib/
 include/
 
 # But keep these specific files
-!bin/compare_qs2.R
+!bin/plot/
+!bin/dolo/
 !bin/barite_fgcs_3.pqi
 !bin/barite_fgcs_4_rt.R
 !bin/barite_fgcs_4.R
 !bin/barite_fgcs_4.qs2
 !bin/db_barite.dat
-!bin/dol.pqi
 !bin/dolo_fgcs_3.qs2
 !bin/dolo_fgcs_3.R
 !bin/dolo_fgcs_3.pqi

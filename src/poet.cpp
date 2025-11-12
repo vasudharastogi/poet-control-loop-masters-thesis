@@ -252,6 +252,10 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
     params.checkpoint_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
+    params.stabilization_interval = 
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("stabilization_interval"));
+    params.penalty_interval =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("penalty_interval"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
     params.ctrl_cell_ids = Rcpp::as<std::vector<uint32_t>>(
@@ -645,6 +649,8 @@ int main(int argc, char *argv[]) {
     const ControlModule::ControlSetup ctrl_setup = {
         run_params.out_dir, // added
         run_params.checkpoint_interval,
+        run_params.penalty_interval,
+        run_params.stabilization_interval,
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
         run_params.mape_threshold};
 

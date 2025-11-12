@@ -50,7 +50,8 @@ struct RuntimeParameters {
   std::string out_ext;
 
   bool print_progress = false;
-
+  std::uint32_t penalty_interval = 0;
+  std::uint32_t stabilization_interval = 0;
   std::uint32_t checkpoint_interval = 0;
   std::uint32_t control_interval = 0;
   std::vector<double> mape_threshold;

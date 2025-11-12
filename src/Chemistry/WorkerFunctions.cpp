@@ -200,8 +200,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   this->warmup_enabled = (flags & 4) != 0;
   this->control_enabled = (flags & 8) != 0;
 
-  /*std::cout << "warmup_enabled is " << warmup_enabled << ", control_enabled is
-     "
+  /*std::cout << "warmup_enabled is " << warmup_enabled << ", control_enabled is "
             << control_enabled << ", dht_enabled is "
             << dht_enabled <<  ", interp_enabled is " << interp_enabled
             << std::endl;*/
