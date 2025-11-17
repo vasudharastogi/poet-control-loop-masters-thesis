@@ -255,6 +255,7 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
+    params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
   } catch (const std::exception &e) {
     ERRMSG("Error while parsing R scripts: " + std::string(e.what()));
     return ParseRet::PARSER_ERROR;
@@ -300,7 +301,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   double dSimTime{0};
 
   for (uint32_t iter = 1; iter < maxiter + 1; iter++) {
-    control.updateControlIteration(iter, params.use_dht, params.use_interp);
+    control.beginIteration(iter, params.use_dht, params.use_interp);
 
     double start_t = MPI_Wtime();
 
@@ -410,7 +411,10 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
-    control.applyControlLogic(chem, iter);      
+    if (control.getControlIntervalEnabled()) {
+      control.processCheckpoint(iter, params.out_dir, chem.getField().GetProps());
+      control.writeErrorMetrics(params.out_dir, chem.getField().GetProps());
+    }
     // MSG();
   } // END SIMULATION LOOP
 
@@ -435,16 +439,13 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   ctrl_profiling["write_stats"] = control.getWriteMetricsTime();
   ctrl_profiling["ctrl_logic_master"] = control.getUpdateCtrlLogicTime();
   ctrl_profiling["recv_data_master"] = chem.GetMasterRecvCtrlDataTime();
-  ctrl_profiling["worker"] =
-      Rcpp::wrap(chem.GetWorkerControlTimings());
-      
+  ctrl_profiling["worker"] = Rcpp::wrap(chem.GetWorkerControlTimings());
 
-  //if (params.use_dht) {
-    chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
-    chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
-    chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
-    chem_profiling["dht_fill_time"] =
-        Rcpp::wrap(chem.GetWorkerDHTFillTimings());
+  // if (params.use_dht) {
+  chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
+  chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
+  chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
+  chem_profiling["dht_fill_time"] = Rcpp::wrap(chem.GetWorkerDHTFillTimings());
   //}
 
   if (params.use_interp) {
@@ -607,10 +608,10 @@ int main(int argc, char *argv[]) {
 
     ChemistryModule chemistry(run_params.work_package_size,
                               init_list.getChemistryInit(), MPI_COMM_WORLD);
-    
-    ControlModule control;
-    chemistry.SetControlModule(&control);
-    control.setChemistryModule(&chemistry);
+
+    // ControlModule control;
+    // chemistry.SetControlModule(&control);
+    // control.setChemistryModule(&chemistry);
 
     const ChemistryModule::SurrogateSetup surr_setup = {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
@@ -627,15 +628,6 @@ int main(int argc, char *argv[]) {
         run_params.use_ai_surrogate};
 
     chemistry.masterEnableSurrogates(surr_setup);
-
-    const ControlModule::ControlSetup ctrl_setup = {
-        run_params.out_dir, // added
-        run_params.checkpoint_interval,
-        run_params.control_interval,
-        getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-        run_params.mape_threshold};
-
-    control.enableControlLogic(ctrl_setup);
 
     if (MY_RANK > 0) {
       chemistry.WorkerLoop();
@@ -680,7 +672,16 @@ int main(int argc, char *argv[]) {
 
       chemistry.masterSetField(init_list.getInitialGrid());
 
-      Rcpp::List profiling = RunMasterLoop(R, run_params, diffusion, chemistry, control);
+      ControlConfig config(run_params.control_interval,
+                           run_params.checkpoint_interval, run_params.zero_abs,
+                           run_params.mape_threshold);
+
+      ControlModule control(config, &chemistry);
+
+      chemistry.SetControlModule(&control);
+
+      Rcpp::List profiling =
+          RunMasterLoop(R, run_params, diffusion, chemistry, control);
 
       MSG("finished simulation loop");
 

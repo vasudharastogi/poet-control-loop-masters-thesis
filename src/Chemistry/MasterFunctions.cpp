@@ -280,10 +280,11 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       // current work package start location in field
       send_buffer[end_of_wp + 4] = wp_start_index;
       // control flags (bitmask)
-      int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 : 0) |
-                  (this->warmup_enabled ? 4 : 0) |
-                  (this->control_enabled ? 8 : 0);
-      send_buffer[end_of_wp + 5] = static_cast<double>(flags);
+
+      /* int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 :
+       0) | (this->warmup_enabled ? 4 : 0) | (this->control_enabled ? 8 : 0);
+       send_buffer[end_of_wp + 5] = static_cast<double>(flags);
+       */
 
       /* ATTENTION Worker p has rank p+1 */
       // MPI_Send(send_buffer, end_of_wp + BUFFER_OFFSET, MPI_DOUBLE, p + 1,
@@ -445,15 +446,28 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
               MPI_INT);
   }
 
+  /* broadcast control state once every iteration */
+  ftype = CHEM_CTRL_ENABLE;
+  PropagateFunctionType(ftype);
+  int ctrl =
+      (this->control_enabled = this->control->getControlIntervalEnabled()) ? 1
+                                                                           : 0;
+  ChemBCast(&ctrl, 1, MPI_INT);
+
+  if (control->shouldBcastFlags()) {
+    int ftype = CHEM_CTRL_FLAGS;
+    PropagateFunctionType(ftype);
+    uint32_t ctrl_flags = buildControlPacket(
+        this->dht_enabled, this->interp_enabled, this->stab_enabled);
+    ChemBCast(&ctrl_flags, 1, MPI_INT);
+
+    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
+  }
+
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
 
   MPI_Barrier(this->group_comm);
-
-  this->control_enabled = this->control_module->getControlIntervalEnabled();
-  if (this->control_enabled) {
-    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
-  }
 
   static uint32_t iteration = 0;
 
@@ -466,7 +480,10 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
 
-  //this->mpi_surr_buffer.resize(mpi_buffer.size());
+  // Only resize surrogate buffer if control is enabled
+  if (this->control_enabled) {
+    this->mpi_surr_buffer.resize(mpi_buffer.size());
+  }
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
@@ -541,9 +558,10 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     }
 
     metrics_a = MPI_Wtime();
-    control_module->computeSpeciesErrorMetrics(out_vec, sur_unshuffled,
-                                               this->n_cells);
+    control->computeErrorMetrics(out_vec, sur_unshuffled, this->n_cells,
+                                 prop_names);
     metrics_b = MPI_Wtime();
+
     this->metrics_t += metrics_b - metrics_a;
   }
 
@@ -556,9 +574,15 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
   /* end time measurement of whole chemistry simulation */
 
+  std::optional<uint32_t> target = std::nullopt;
+  if (this->control_enabled) {
+    target = control->getRollbackTarget(prop_names);
+  }
+  int flush = (this->control_enabled && target.has_value()) ? 1 : 0;
+
   /* advise workers to end chemistry iteration */
   for (int i = 1; i < this->comm_size; i++) {
-    MPI_Send(NULL, 0, MPI_DOUBLE, i, LOOP_END, this->group_comm);
+    MPI_Send(&flush, 1, MPI_INT, i, LOOP_END, this->group_comm);
   }
 
   this->simtime += dt;
