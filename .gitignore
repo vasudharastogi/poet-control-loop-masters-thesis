@@ -151,10 +151,3 @@ share/
 lib/
 include/
 
-# But keep these specific files
-!bin/plot/
-!bin/dolo_fgcs_3.qs2
-!bin/dolo_fgcs_3.R
-!bin/dolo_fgcs.pqi
-!bin/phreeqc_kin.dat
-!bin/run_poet.sh
