@@ -152,10 +152,6 @@ lib/
 include/
 
 # But keep these specific files
-!bin/barite_fgcs_2.pqi
-!bin/barite_fgcs_2.qs2
-!bin/barite_fgcs_2.R
-!bin/dolo/
 !bin/plot/
 !bin/dolo_fgcs_3.qs2
 !bin/dolo_fgcs_3.R
