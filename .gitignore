@@ -150,4 +150,4 @@ bin/*
 share/
 lib/
 include/
-
+/.ai/
