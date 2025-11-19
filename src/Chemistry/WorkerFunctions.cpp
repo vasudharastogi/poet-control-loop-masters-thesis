@@ -59,6 +59,15 @@ void poet::ChemistryModule::WorkerLoop() {
                 MPI_INT, 0, this->group_comm);
       break;
     }
+    case CHEM_CTRL_FLAGS: {
+      int flags = 0;
+      ChemBCast(&flags, 1, MPI_INT);
+      this->dht_enabled = hasFlag(flags, DHT_ENABLE);
+      this->interp_enabled = hasFlag(flags, IP_ENABLE);
+      this->stab_enabled = hasFlag(flags, STAB_ENABLE);
+      break;
+    }
+
     case CHEM_WORK_LOOP: {
       WorkerProcessPkgs(timings, iteration);
       break;
@@ -116,7 +125,16 @@ void poet::ChemistryModule::WorkerProcessPkgs(struct worker_s &timings,
   }
 }
 
-void poet::ChemistryModule::ProcessControlWorkPackage(
+void poet::ChemistryModule::copyPkgs(const WorkPackage &wp,
+                                     std::vector<double> &mpi_buffer) {
+
+  for (std::size_t wp_i = 0; wp_i < wp.size; wp_i++) {
+    std::copy(wp.output[wp_i].begin(), wp.output[wp_i].end(),
+              mpi_buffer.begin() + this->prop_count * wp_i);
+  }
+}
+
+void poet::ChemistryModule::processCtrlPkgs(
     std::vector<std::vector<double>> &input, double current_sim_time, double dt,
     struct worker_s &timings) {
 
@@ -137,10 +155,7 @@ void poet::ChemistryModule::ProcessControlWorkPackage(
 
   timings.ctrl_phreeqc_t += phreeqc_end - phreeqc_start;
 
-  for (std::size_t wp_i = 0; wp_i < control_wp.size; wp_i++) {
-    std::copy(control_wp.output[wp_i].begin(), control_wp.output[wp_i].end(),
-              mpi_buffer.begin() + this->prop_count * wp_i);
-  }
+  copyPkgs(control_wp, mpi_buffer);
 
   MPI_Request send_req;
   MPI_Isend(mpi_buffer.data(), mpi_buffer.size(), MPI_DOUBLE, 0, LOOP_CTRL,
@@ -194,13 +209,16 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   wp_start_index = mpi_buffer[count + 4];
 
   // read packed control flags
+  /*
   flags = static_cast<int>(mpi_buffer[count + 5]);
   this->interp_enabled = (flags & 1) != 0;
   this->dht_enabled = (flags & 2) != 0;
   this->warmup_enabled = (flags & 4) != 0;
   this->control_enabled = (flags & 8) != 0;
+  */
 
-  /*std::cout << "warmup_enabled is " << warmup_enabled << ", control_enabled is "
+  /*std::cout << "warmup_enabled is " << warmup_enabled << ", control_enabled is
+     "
             << control_enabled << ", dht_enabled is "
             << dht_enabled <<  ", interp_enabled is " << interp_enabled
             << std::endl;*/
@@ -212,7 +230,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   }
 
   // std::cout << this->comm_rank << ":" << counter++ << std::endl;
-  if (dht_enabled || interp_enabled || warmup_enabled) {
+  if (dht_enabled || interp_enabled || stab_enabled) {
     dht->prepareKeys(s_curr_wp.input, dt);
   }
 
@@ -241,18 +259,19 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     uint32_t cell_id = s_curr_wp.input[wp_i][0];
-    
-    bool is_control_cell = this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end();
-    bool used_surrogate = s_curr_wp.mapping[wp_i] != CHEM_PQC;
-    
-    if (is_control_cell && used_surrogate) {
+
+    bool is_ctrl_cell =
+        this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end();
+    bool used_sur = s_curr_wp.mapping[wp_i] != CHEM_PQC;
+
+    if (is_ctrl_cell && used_sur) {
 
       control_batch.push_back(s_curr_wp.input[wp_i]);
       control_cells_processed++;
 
       if (control_batch.size() == s_curr_wp.size ||
           control_cells_processed == this->ctrl_cell_ids.size()) {
-        ProcessControlWorkPackage(control_batch, current_sim_time, dt, timings);
+        processCtrlPkgs(control_batch, current_sim_time, dt, timings);
         control_batch.clear();
         control_cells_processed = 0;
       }
@@ -265,23 +284,20 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   phreeqc_time_end = MPI_Wtime();
 
-  for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
-    std::copy(s_curr_wp.output[wp_i].begin(), s_curr_wp.output[wp_i].end(),
-              mpi_buffer.begin() + this->prop_count * wp_i);
-  }
+  copyPkgs(s_curr_wp, mpi_buffer);
 
   /* send results to master */
   MPI_Request send_req;
   MPI_Isend(mpi_buffer.data(), count, MPI_DOUBLE, 0, LOOP_WORK, MPI_COMM_WORLD,
             &send_req);
 
-  if (dht_enabled || interp_enabled || warmup_enabled) {
+  if (dht_enabled || interp_enabled || stab_enabled) {
     /* write results to DHT */
     dht_fill_start = MPI_Wtime();
     dht->fillDHT(s_curr_wp);
     dht_fill_end = MPI_Wtime();
 
-    if (interp_enabled || warmup_enabled) {
+    if (interp_enabled || stab_enabled) {
       interp->writePairs();
     }
     timings.dht_fill += dht_fill_end - dht_fill_start;
@@ -291,10 +307,18 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   MPI_Wait(&send_req, MPI_STATUS_IGNORE);
 }
 
-void poet::ChemistryModule::WorkerPostIter(MPI_Status &prope_status,
+void poet::ChemistryModule::WorkerPostIter(MPI_Status &probe_status,
                                            uint32_t iteration) {
-  MPI_Recv(NULL, 0, MPI_DOUBLE, 0, LOOP_END, this->group_comm,
-           MPI_STATUS_IGNORE);
+  int size, flush_request = 0;
+  MPI_Get_count(&probe_status, MPI_INT, &size);
+
+  if (size == 1) {
+    MPI_Recv(&flush_request, size, MPI_INT, probe_status.MPI_SOURCE, LOOP_END,
+             this->group_comm, MPI_STATUS_IGNORE);
+  } else {
+    MPI_Recv(NULL, 0, MPI_INT, probe_status.MPI_SOURCE, LOOP_END,
+             this->group_comm, MPI_STATUS_IGNORE);
+  }
 
   if (this->dht_enabled) {
     dht_hits.push_back(dht->getHits());
@@ -320,7 +344,7 @@ void poet::ChemistryModule::WorkerPostIter(MPI_Status &prope_status,
     const auto max_mean_idx =
         DHT_get_used_idx_factor(this->interp->getDHTObject(), 1);
 
-    if (max_mean_idx >= 2) {
+    if (max_mean_idx >= 2 || flush_request) {
       DHT_flush(this->interp->getDHTObject());
       DHT_flush(this->dht->getDHT());
       if (this->comm_rank == 2) {

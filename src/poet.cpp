@@ -252,10 +252,10 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
     params.checkpoint_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
-    params.stabilization_interval = 
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("stabilization_interval"));
-    params.penalty_interval =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("penalty_interval"));
+    params.stab_interval =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("stab_interval"));
+    params.zero_abs =
+        Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
     params.ctrl_cell_ids = Rcpp::as<std::vector<uint32_t>>(
@@ -305,7 +305,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
 
   double dSimTime{0};
   for (uint32_t iter = 1; iter < maxiter + 1; iter++) {
-    control.updateControlIteration(iter, params.use_dht, params.use_interp);
+    control.beginIteration(chem, iter, params.use_dht, params.use_interp);
 
     double start_t = MPI_Wtime();
 
@@ -415,7 +415,9 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
-    control.applyControlLogic(diffusion, iter);
+    control.processCheckpoint(diffusion, iter, params.out_dir,
+                              chem.getField().GetProps());
+
     // MSG();
   } // END SIMULATION LOOP
 
@@ -622,9 +624,6 @@ int main(int argc, char *argv[]) {
 
     ChemistryModule chemistry(run_params.work_package_size,
                               init_list.getChemistryInit(), MPI_COMM_WORLD);
-    ControlModule control;
-    chemistry.SetControlModule(&control);
-    control.setChemistryModule(&chemistry);
 
     const ChemistryModule::SurrogateSetup surr_setup = {
         getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
@@ -645,16 +644,6 @@ int main(int argc, char *argv[]) {
     /* broadcast control cell ids before simulation starts */
     getControlCellIds(run_params.ctrl_cell_ids, 0, MPI_COMM_WORLD);
     chemistry.SetControlCellIds(run_params.ctrl_cell_ids);
-
-    const ControlModule::ControlSetup ctrl_setup = {
-        run_params.out_dir, // added
-        run_params.checkpoint_interval,
-        run_params.penalty_interval,
-        run_params.stabilization_interval,
-        getSpeciesNames(init_list.getInitialGrid(), 0, MPI_COMM_WORLD),
-        run_params.mape_threshold};
-
-    control.enableControlLogic(ctrl_setup);
 
     if (MY_RANK > 0) {
       chemistry.WorkerLoop();
@@ -697,7 +686,14 @@ int main(int argc, char *argv[]) {
       DiffusionModule diffusion(init_list.getDiffusionInit(),
                                 init_list.getInitialGrid());
 
+      ControlConfig config(run_params.stab_interval,
+                           run_params.checkpoint_interval, run_params.zero_abs,
+                           run_params.mape_threshold);
+
+      ControlModule control(config);
+
       chemistry.masterSetField(init_list.getInitialGrid());
+      chemistry.SetControlModule(&control);
 
       Rcpp::List profiling =
           RunMasterLoop(R, run_params, diffusion, chemistry, control);

@@ -102,6 +102,7 @@ public:
     this->ai_surrogate_enabled = setup.ai_surrogate_enabled;
 
     this->base_totals = setup.base_totals;
+    this->ctrl_file_out_dir = setup.dht_out_dir;
 
     if (this->dht_enabled || this->interp_enabled) {
       this->initializeDHT(setup.dht_size_mb, this->params.dht_species,
@@ -258,7 +259,7 @@ public:
 
   std::vector<int> ai_surrogate_validity_vector;
 
-  void SetControlModule(poet::ControlModule *ctrl) { control_module = ctrl; }
+  void SetControlModule(poet::ControlModule *ctrl) { control = ctrl; }
 
   void SetDhtEnabled(bool enabled) { this->dht_enabled = enabled; }
   bool GetDhtEnabled() const { return this->dht_enabled; }
@@ -266,7 +267,8 @@ public:
   void SetInterpEnabled(bool enabled) { this->interp_enabled = enabled; }
   bool GetInterpEnabled() const { return interp_enabled; }
 
-  void SetWarmupEnabled(bool enabled) { this->warmup_enabled = enabled; }
+  void SetStabEnabled(bool enabled) { this->stab_enabled = enabled; }
+  bool GetStabEnabled() const { return stab_enabled; }
 
   void SetControlCellIds(const std::vector<uint32_t> &ids) {
     this->ctrl_cell_ids = std::unordered_set<uint32_t>(ids.begin(), ids.end());
@@ -285,13 +287,13 @@ protected:
 
   enum {
     CHEM_FIELD_INIT,
-    // CHEM_DHT_ENABLE,
+    CHEM_DHT_ENABLE,
+    CHEM_IP_ENABLE,
+    CHEM_CTRL_ENABLE,
+    CHEM_CTRL_FLAGS,
     CHEM_DHT_SIGNIF_VEC,
     CHEM_DHT_SNAPS,
     CHEM_DHT_READ_FILE,
-    // CHEM_WARMUP_PHASE,  // Control flag
-    // CHEM_CTRL_ENABLE, // Control flag
-    // CHEM_IP_ENABLE,
     CHEM_IP_MIN_ENTRIES,
     CHEM_IP_SIGNIF_VEC,
     CHEM_WORK_LOOP,
@@ -299,6 +301,9 @@ protected:
     CHEM_BREAK_MAIN_LOOP,
     CHEM_AI_BCAST_VALIDITY
   };
+
+  /* broadcasted only every control iteration */
+  enum { DHT_ENABLE = 1u << 0, IP_ENABLE = 1u << 1, STAB_ENABLE = 1u << 2 };
 
   enum { LOOP_WORK, LOOP_END, LOOP_CTRL };
 
@@ -358,7 +363,7 @@ protected:
 
   void WorkerDoWork(MPI_Status &probe_status, int double_count,
                     struct worker_s &timings);
-  void WorkerPostIter(MPI_Status &prope_status, uint32_t iteration);
+  void WorkerPostIter(MPI_Status &probe_status, uint32_t iteration);
   void WorkerPostSim(uint32_t iteration);
 
   void WorkerWriteDHTDump(uint32_t iteration);
@@ -369,10 +374,6 @@ protected:
 
   void WorkerRunWorkPackage(WorkPackage &work_package, double dSimTime,
                             double dTimestep);
-
-  void ProcessControlWorkPackage(std::vector<std::vector<double>> &input,
-                                 double current_sim_time, double dt,
-                                 struct worker_s &timings);
 
   std::vector<uint32_t> CalculateWPSizesVector(uint32_t n_cells,
                                                uint32_t wp_size) const;
@@ -388,9 +389,25 @@ protected:
 
   void BCastStringVec(std::vector<std::string> &io);
 
-  int packResultsIntoBuffer(std::vector<double> &mpi_buffer, int base_count,
-                            const WorkPackage &wp,
-                            const WorkPackage &wp_control);
+  void processCtrlPkgs(std::vector<std::vector<double>> &input,
+                       double current_sim_time, double dt,
+                       struct worker_s &timings);
+
+  void copyPkgs(const WorkPackage &wp, std::vector<double> &mpi_buffer);
+
+  inline int buildCtrlFlags(bool dht, bool interp, bool stab) {
+    int flags = 0;
+
+    if (dht)
+      flags |= DHT_ENABLE;
+    if (interp)
+      flags |= IP_ENABLE;
+    if (stab)
+      flags |= STAB_ENABLE;
+    return flags;
+  }
+
+  inline bool hasFlag(int flags, int type) { return (flags & type) != 0; }
 
   int comm_size, comm_rank;
   MPI_Comm group_comm;
@@ -410,7 +427,7 @@ protected:
 
   bool ai_surrogate_enabled{false};
 
-  static constexpr uint32_t BUFFER_OFFSET = 6;
+  static constexpr uint32_t BUFFER_OFFSET = 5;
 
   inline void ChemBCast(void *buf, int count, MPI_Datatype datatype) const {
     MPI_Bcast(buf, count, datatype, 0, this->group_comm);
@@ -447,13 +464,14 @@ protected:
 
   std::unique_ptr<PhreeqcRunner> pqc_runner;
 
-  poet::ControlModule *control_module = nullptr;
+  std::string ctrl_file_out_dir;
+
+  poet::ControlModule *control = nullptr;
 
   std::vector<double> mpi_surr_buffer;
 
   bool control_enabled{false};
-  bool warmup_enabled{false};
-
+  bool stab_enabled{false};
   std::unordered_set<uint32_t> ctrl_cell_ids;
   std::vector<std::vector<double>> control_batch;
 };

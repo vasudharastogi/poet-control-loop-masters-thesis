@@ -7,6 +7,7 @@
 #include "poet.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -15,107 +16,105 @@ namespace poet {
 class ChemistryModule;
 class DiffusionModule;
 
+struct ControlConfig {
+  uint32_t stab_interval = 0;
+  uint32_t checkpoint_interval = 0;
+  double zero_abs = 0.0;
+  std::vector<double> mape_threshold;
+};
+
+struct SpeciesErrorMetrics {
+  std::vector<std::uint32_t> id;
+  std::vector<std::vector<double>> mape;
+  std::vector<std::vector<double>> rrmse;
+  uint32_t iteration = 0;
+  uint32_t rollback_count = 0;
+
+  SpeciesErrorMetrics(uint32_t n_cells, uint32_t n_species, uint32_t iter,
+                      uint32_t rb_count)
+      : mape(n_cells, std::vector<double>(n_species, 0.0)),
+        rrmse(n_cells, std::vector<double>(n_species, 0.0)), iteration(iter),
+        rollback_count(rb_count) {}
+};
+
 class ControlModule {
 
 public:
-  /* Control configuration*/
+  explicit ControlModule(const ControlConfig &config);
 
-  // std::uint32_t global_iter = 0;
-  // std::uint32_t sur_disabled_counter = 0;
-  // std::uint32_t rollback_counter = 0;
+  void beginIteration(ChemistryModule &chem, const uint32_t &iter,
+                      const bool &dht_enabled, const bool &interp_enaled);
 
-  void updateControlIteration(const uint32_t &iter, const bool &dht_enabled,
-                              const bool &interp_enaled);
+  void writeErrorMetrics(const std::string &out_dir,
+                         const std::vector<std::string> &species);
 
-  void initiateWarmupPhase(bool dht_enabled, bool interp_enabled);
+  std::optional<uint32_t> getRollbackTarget();
 
-  bool checkAndRollback(DiffusionModule &diffusion, uint32_t &iter);
+  void computeErrorMetrics(std::vector<std::vector<double>> &reference_values,
+                           std::vector<std::vector<double>> &surrogate_values,
+                           const std::vector<std::string> &species);
 
-  struct SpeciesErrorMetrics {
-    std::vector<std::uint32_t> id;
-    std::vector<std::vector<double>> mape;
-    std::vector<std::vector<double>> rrmse;
-    uint32_t iteration; // iterations in simulation after rollbacks
-    uint32_t rollback_count;
+  void processCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter,
+                         const std::string &out_dir,
+                         const std::vector<std::string> &species);
 
-    SpeciesErrorMetrics(uint32_t num_cells, uint32_t species_count,
-                        uint32_t iter, uint32_t counter)
-        : mape(num_cells, std::vector<double>(species_count, 0.0)),
-          rrmse(num_cells, std::vector<double>(species_count, 0.0)),
-          iteration(iter), rollback_count(counter) {}
-  };
+  std::optional<uint32_t>
+  getRollbackTarget(const std::vector<std::string> &species);
 
-  void computeSpeciesErrorMetrics(
-      std::vector<std::vector<double>> &reference_values,
-      std::vector<std::vector<double>> &surrogate_values);
+   
+  bool shouldBcastFlags();
 
-  std::vector<SpeciesErrorMetrics> metricsHistory;
-
-  struct ControlSetup {
-    std::string out_dir;
-    std::uint32_t checkpoint_interval;
-    std::uint32_t penalty_interval;
-    std::uint32_t stabilization_interval;
-    std::vector<std::string> species_names;
-    std::vector<double> mape_threshold;
-    std::vector<uint32_t> ctrl_cell_ids;
-  };
-
-  void enableControlLogic(const ControlSetup &setup) {
-    this->out_dir = setup.out_dir;
-    this->checkpoint_interval = setup.checkpoint_interval;
-    this->stabilization_interval = setup.stabilization_interval;
-    this->species_names = setup.species_names;
-    this->mape_threshold = setup.mape_threshold;
-    this->ctrl_cell_ids = setup.ctrl_cell_ids;
-  }
-
-  void applyControlLogic(DiffusionModule &diffusion, uint32_t &iter);
-
-  void writeCheckpointAndMetrics(DiffusionModule &diffusion, uint32_t iter);
+  bool getFlushRequest() const { return flush_request; }
+  void clearFlushRequest() { flush_request = false; }
 
   auto getGlobalIteration() const noexcept { return global_iteration; }
 
-  void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
+  // void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
 
-  std::vector<double> getMapeThreshold() const { return this->mape_threshold; }
+  std::vector<double> getMapeThreshold() const {
+    return this->config.mape_threshold;
+  }
 
   std::vector<uint32_t> getCtrlCellIds() const { return this->ctrl_cell_ids; }
 
   /* Profiling getters */
-
-  auto getUpdateCtrlLogicTime() const { return this->prep_t; }
-
-  auto getWriteCheckpointTime() const { return this->w_check_t; }
-
-  auto getReadCheckpointTime() const { return this->r_check_t; }
-
-  auto getWriteMetricsTime() const { return this->stats_t; }
+  auto getUpdateCtrlLogicTime() const { return prep_t; }
+  auto getWriteCheckpointTime() const { return w_check_t; }
+  auto getReadCheckpointTime() const { return r_check_t; }
+  auto getWriteMetricsTime() const { return stats_t; }
 
 private:
-  bool rollback_enabled = false;
+  void updateStabilizationPhase(ChemistryModule &chem, bool dht_enabled,
+                                bool interp_enabled);
 
-  poet::ChemistryModule *chem = nullptr;
+  void readCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter,
+                      uint32_t rollback_iter, const std::string &out_dir);
+  void writeCheckpoint(DiffusionModule &diffusion, uint32_t &iter,
+                       const std::string &out_dir);
 
-  std::uint32_t stabilization_interval = 0;
-  std::uint32_t penalty_interval = 0;
-  std::uint32_t checkpoint_interval = 0;
+  uint32_t getRollbackIter();
+
+  ControlConfig config;
+
   std::uint32_t global_iteration = 0;
   std::uint32_t rollback_count = 0;
-  std::uint32_t sur_disabled_counter = 0;
-  std::vector<double> mape_threshold;
+  std::uint32_t disable_surr_counter = 0;
   std::vector<uint32_t> ctrl_cell_ids;
+  std::uint32_t last_checkpoint_written = 0;
+  std::uint32_t penalty_interval = 0;
 
-  std::vector<std::string> species_names;
-  std::string out_dir;
+  bool rollback_enabled = false;
+  bool flush_request = false;
+  bool stab_phase_ended = false;
+
+  bool bcast_flags = false;
+
+  std::vector<SpeciesErrorMetrics> metrics_history;
 
   double prep_t = 0.;
   double r_check_t = 0.;
   double w_check_t = 0.;
   double stats_t = 0.;
-
-  /* Buffer for shuffled surrogate data */
-  std::vector<double> sur_shuffled;
 };
 
 } // namespace poet

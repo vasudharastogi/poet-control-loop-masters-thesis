@@ -50,12 +50,11 @@ struct RuntimeParameters {
   std::string out_ext;
 
   bool print_progress = false;
-  std::uint32_t penalty_interval = 0;
-  std::uint32_t stabilization_interval = 0;
+  std::uint32_t stab_interval = 0;
   std::uint32_t checkpoint_interval = 0;
-  std::uint32_t control_interval = 0;
+  double zero_abs = 0.0;
   std::vector<double> mape_threshold;
-  std::vector<uint32t_t> ctrl_cell_ids;
+  std::vector<uint32_t> ctrl_cell_ids;
 
   static constexpr std::uint32_t WORK_PACKAGE_SIZE_DEFAULT = 32;
   std::uint32_t work_package_size = WORK_PACKAGE_SIZE_DEFAULT;

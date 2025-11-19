@@ -280,11 +280,13 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       // current work package start location in field
       send_buffer[end_of_wp + 4] = wp_start_index;
       // control flags (bitmask)
+
+      /*
       int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 : 0) |
                   (this->warmup_enabled ? 4 : 0) |
                   (this->control_enabled ? 8 : 0);
       send_buffer[end_of_wp + 5] = static_cast<double>(flags);
-
+      */
       /* ATTENTION Worker p has rank p+1 */
       // MPI_Send(send_buffer, end_of_wp + BUFFER_OFFSET, MPI_DOUBLE, p + 1,
       //          LOOP_WORK, this->group_comm);
@@ -441,6 +443,14 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
               MPI_INT);
   }
 
+  if (control->shouldBcastFlags()) {
+    int ftype = CHEM_CTRL_FLAGS;
+    PropagateFunctionType(ftype);
+    uint32_t ctrl_flags = buildCtrlFlags(
+        this->dht_enabled, this->interp_enabled, this->stab_enabled);
+    ChemBCast(&ctrl_flags, 1, MPI_INT);
+  }
+
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
 
@@ -512,6 +522,9 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
+  std::cout << "[DEBUG] control_batch.size() = " 
+          << this->control_batch.size() << std::endl;
+
   if (!this->control_batch.empty()) {
     std::cout << "[Master] Processing " << this->control_batch.size()
               << " control cells for comparison." << std::endl;
@@ -536,8 +549,11 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     }
 
     metrics_a = MPI_Wtime();
-    control_module->computeSpeciesErrorMetrics(this->control_batch,
-                                               surrogate_batch);
+    control->computeErrorMetrics(this->control_batch, surrogate_batch,
+                                 prop_names);
+
+    control->writeErrorMetrics(ctrl_file_out_dir, prop_names);
+
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
 
@@ -553,11 +569,19 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   this->seq_t += seq_d - seq_c;
 
   /* end time measurement of whole chemistry simulation */
+  std::optional<uint32_t> target = control->getRollbackTarget(prop_names);
+  int flush = target.has_value() ? 1 : 0;
 
   /* advise workers to end chemistry iteration */
   for (int i = 1; i < this->comm_size; i++) {
-    MPI_Send(NULL, 0, MPI_DOUBLE, i, LOOP_END, this->group_comm);
+    MPI_Send(&flush, 1, MPI_INT, i, LOOP_END, this->group_comm);
   }
+
+  /*
+  if (flush) {
+    control->clearFlushRequest();
+  }
+  */
 
   this->simtime += dt;
   iteration++;
