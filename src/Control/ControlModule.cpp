@@ -94,8 +94,12 @@ void poet::ControlModule::writeErrorMetrics(
   double stats_a, stats_b;
 
   stats_a = MPI_Wtime();
-  writeStatsToCSV(metrics_history, species, out_dir, "overview");
-  write_metrics(metrics_history, species, out_dir, "metrics_overview");
+  writeSpeciesStatsToCSV(metrics_history, species, out_dir,
+                         "species_overview.csv");
+  writeCellStatsToCSV(cell_metrics_history, species, out_dir,
+                      "cell_overview.csv");
+  write_metrics(cell_metrics_history, species, out_dir,
+                "metrics_overview.hdf5");
   stats_b = MPI_Wtime();
 
   this->stats_t += stats_b - stats_a;
@@ -132,30 +136,40 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
     return std::nullopt;
   }
 
-  const auto &mape = metrics_history.back().mape;
-  for (size_t row = 0; row < mape.size(); row++) {
-    for (size_t col = 0; col < species.size() && col < mape[row].size();
-         col++) {
+  const auto &s_mape = metrics_history.back().mape;
 
-      if (mape[row][col] == 0) {
-        continue;
+  for (size_t sp_i = 2; sp_i < species.size(); sp_i++) {
+
+    if (s_mape[sp_i] == 0) {
+      continue;
+    }
+    if (s_mape[sp_i] > config.mape_threshold[sp_i]) {
+      if (last_checkpoint_written == 0) {
+        MSG(" Threshold exceeded but no checkpoint exists yet.");
+        return std::nullopt;
       }
 
-      if (mape[row][col] > config.mape_threshold[col]) {
+      const auto &c_mape = cell_metrics_history.back().mape;
+      const auto &c_id = cell_metrics_history.back().id;
 
-        if (last_checkpoint_written == 0) {
-          MSG(" Threshold exceeded but no checkpoint exists yet.");
-          return std::nullopt;
-        }
-        rollback_enabled = true;
-        flush_request = true;
+      auto max_it = std::max_element(
+          c_mape.begin(), c_mape.end(),
+          [sp_i](const auto &a, const auto &b) { return a[sp_i] < b[sp_i]; });
 
-        MSG("Threshold exceeded " + species[col] + " has MAPE = " +
-            std::to_string(mape[row][col]) + " exceeding threshold = " +
-            std::to_string(config.mape_threshold[col]));
+      size_t max_idx = std::distance(c_mape.begin(), max_it);
+      uint32_t cell_id = c_id[max_idx];
+      double cell_mape = (*max_it)[sp_i];
 
-        return getRollbackIter();
-      }
+      rollback_enabled = true;
+      flush_request = true;
+
+      MSG("Threshold exceeded for " + species[sp_i] +
+          " with species-level MAPE = " + std::to_string(s_mape[sp_i]) +
+          " exceeding threshold = " +
+          std::to_string(config.mape_threshold[sp_i]) + ". Worst cell: ID=" +
+          std::to_string(cell_id) + " with MAPE=" + std::to_string(cell_mape));
+
+      return getRollbackIter();
     }
   }
   rollback_enabled = false;
@@ -166,7 +180,7 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
 void poet::ControlModule::computeErrorMetrics(
     std::vector<std::vector<double>> &reference_values,
     std::vector<std::vector<double>> &surrogate_values,
-    const std::vector<std::string> &species) {
+    const std::vector<std::string> &species, const uint32_t size_per_prop) {
 
   // Skip metric computation if already in rollback/stabilization phase
   if (rollback_enabled) {
@@ -174,36 +188,54 @@ void poet::ControlModule::computeErrorMetrics(
   }
 
   const uint32_t n_cells = reference_values.size();
+  const uint32_t n_species = species.size();
+  const double ZERO_ABS = config.zero_abs;
 
-  SpeciesErrorMetrics metrics(n_cells, species.size(), global_iteration,
-                              rollback_count);
+  CellErrorMetrics c_metrics(n_cells, n_species, global_iteration,
+                             rollback_count);
+  SpeciesErrorMetrics s_metrics(n_species, global_iteration, rollback_count);
+
+  std::vector<double> species_err_sum(n_species, 0.0);
+  std::vector<double> species_sqr_sum(n_species, 0.0);
 
   for (size_t cell_i = 0; cell_i < n_cells; cell_i++) {
 
-    metrics.id.push_back(reference_values[cell_i][0]);
+    c_metrics.id.push_back(reference_values[cell_i][0]);
 
-    for (size_t sp_i = 0; sp_i < species.size(); sp_i++) {
-      const double ref_value = reference_values[cell_i][sp_i + 1];
-      const double sur_value = surrogate_values[cell_i][sp_i + 1];
-      const double ZERO_ABS = config.zero_abs;
+    for (size_t sp_i = 2; sp_i < n_species; sp_i++) {
+      const double ref_value = reference_values[cell_i][sp_i];
+      const double sur_value = surrogate_values[cell_i][sp_i];
 
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
         continue;
       }
-
       if (std::abs(ref_value) < ZERO_ABS) {
         if (std::abs(sur_value) >= ZERO_ABS) {
-          metrics.mape[cell_i][sp_i] = 100.0;
-          metrics.rrmse[cell_i][sp_i] = 1.0;
+
+          species_err_sum[sp_i] += 1.0;
+          species_sqr_sum[sp_i] += 1.0;
+
+          c_metrics.mape[cell_i][sp_i] = 100.0;
+          c_metrics.rrmse[cell_i][sp_i] = 1.0;
         }
       } else {
         double alpha = 1.0 - (sur_value / ref_value);
-        metrics.mape[cell_i][sp_i] = 100.0 * std::abs(alpha);
-        metrics.rrmse[cell_i][sp_i] = alpha * alpha;
+
+        species_err_sum[sp_i] += std::abs(alpha);
+        species_sqr_sum[sp_i] += alpha * alpha;
+
+        c_metrics.mape[cell_i][sp_i] = 100.0 * std::abs(alpha);
+        c_metrics.rrmse[cell_i][sp_i] = alpha * alpha;
       }
     }
   }
-  metrics_history.push_back(metrics);
+  for (size_t sp_i = 2; sp_i < n_species; sp_i++) {
+    s_metrics.mape[sp_i] = 100.0 * (species_err_sum[sp_i] / size_per_prop);
+    s_metrics.rrmse[sp_i] = std::sqrt(species_sqr_sum[sp_i] / size_per_prop);
+  }
+
+  metrics_history.push_back(s_metrics);
+  cell_metrics_history.push_back(c_metrics);
 }
 
 void poet::ControlModule::processCheckpoint(

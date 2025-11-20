@@ -550,7 +550,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
     metrics_a = MPI_Wtime();
     control->computeErrorMetrics(this->control_batch, surrogate_batch,
-                                 prop_names);
+                                 prop_names, n_cells);
     control->writeErrorMetrics(ctrl_file_out_dir, prop_names);
 
     metrics_b = MPI_Wtime();

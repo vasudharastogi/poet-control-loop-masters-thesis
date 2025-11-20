@@ -3,8 +3,8 @@
 
 #include "Base/Macros.hpp"
 #include "Chemistry/ChemistryModule.hpp"
-#include "Transport/DiffusionModule.hpp"
 #include "IO/HDF5Functions.hpp"
+#include "Transport/DiffusionModule.hpp"
 #include "poet.hpp"
 
 #include <cstdint>
@@ -24,21 +24,30 @@ struct ControlConfig {
   std::vector<double> mape_threshold;
 };
 
-struct SpeciesErrorMetrics {
+struct CellErrorMetrics {
   std::vector<std::uint32_t> id;
   std::vector<std::vector<double>> mape;
   std::vector<std::vector<double>> rrmse;
   uint32_t iteration = 0;
   uint32_t rollback_count = 0;
 
-  SpeciesErrorMetrics(uint32_t n_cells, uint32_t n_species, uint32_t iter,
-                      uint32_t rb_count)
+  CellErrorMetrics(uint32_t n_cells, uint32_t n_species, uint32_t iter,
+                   uint32_t rb_count)
       : mape(n_cells, std::vector<double>(n_species, 0.0)),
         rrmse(n_cells, std::vector<double>(n_species, 0.0)), iteration(iter),
         rollback_count(rb_count) {}
 };
 
+struct SpeciesErrorMetrics {
+  std::vector<double> mape;
+  std::vector<double> rrmse;
+  uint32_t iteration = 0;
+  uint32_t rollback_count = 0;
 
+  SpeciesErrorMetrics(uint32_t n_species, uint32_t iter, uint32_t rb_count)
+      : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter),
+        rollback_count(rb_count) {}
+};
 
 class ControlModule {
 
@@ -55,7 +64,8 @@ public:
 
   void computeErrorMetrics(std::vector<std::vector<double>> &reference_values,
                            std::vector<std::vector<double>> &surrogate_values,
-                           const std::vector<std::string> &species);
+                           const std::vector<std::string> &species,
+                           const uint32_t size_per_prop);
 
   void processCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter,
                          const std::string &out_dir,
@@ -64,7 +74,6 @@ public:
   std::optional<uint32_t>
   getRollbackTarget(const std::vector<std::string> &species);
 
-   
   bool shouldBcastFlags();
 
   bool getFlushRequest() const { return flush_request; }
@@ -112,6 +121,7 @@ private:
 
   bool bcast_flags = false;
 
+  std::vector<CellErrorMetrics> cell_metrics_history;
   std::vector<SpeciesErrorMetrics> metrics_history;
 
   double prep_t = 0.;

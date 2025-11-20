@@ -6,6 +6,7 @@
 
 namespace poet {
   struct SpeciesErrorMetrics;
+  struct CellErrorMetrics;
 }
 
 int write_checkpoint(const std::string &dir_path, const std::string &file_name,
@@ -14,6 +15,6 @@ int write_checkpoint(const std::string &dir_path, const std::string &file_name,
 int read_checkpoint(const std::string &dir_path, const std::string &file_name,
                     struct Checkpoint_s &checkpoint);
 
-int write_metrics(const std::vector<poet::SpeciesErrorMetrics> &metrics_history,
-                   const std::vector<std::string> &species_names,
-                   const std::string &dir_path, const std::string &file_name);
+int write_metrics(const std::vector<poet::CellErrorMetrics> &metrics_history,
+                  const std::vector<std::string> &species_names,
+                  const std::string &dir_path, const std::string &file_name);
