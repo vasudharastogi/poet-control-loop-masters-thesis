@@ -4,6 +4,7 @@
 #include "Base/Macros.hpp"
 #include "Chemistry/ChemistryModule.hpp"
 #include "Transport/DiffusionModule.hpp"
+#include "IO/HDF5Functions.hpp"
 #include "poet.hpp"
 
 #include <cstdint>
@@ -36,6 +37,8 @@ struct SpeciesErrorMetrics {
         rrmse(n_cells, std::vector<double>(n_species, 0.0)), iteration(iter),
         rollback_count(rb_count) {}
 };
+
+
 
 class ControlModule {
 

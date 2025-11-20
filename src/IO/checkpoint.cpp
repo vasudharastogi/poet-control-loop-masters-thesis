@@ -1,42 +1,45 @@
 #include "IO/Datatypes.hpp"
 #include <cstdint>
-#include <highfive/H5Easy.hpp>
 #include <filesystem>
+#include <highfive/H5Easy.hpp>
 
 namespace fs = std::filesystem;
 
-int write_checkpoint(const std::string &dir_path, const std::string &file_name, struct Checkpoint_s &&checkpoint){
-    
-    if (!fs::exists(dir_path)) {
-        std::cerr << "Directory does not exist: " << dir_path << std::endl;
-        return -1;
-    }
-    fs::path file_path = fs::path(dir_path) / file_name;
-    // TODO: errorhandling
-    H5Easy::File file(file_path, H5Easy::File::Overwrite);
+int write_checkpoint(const std::string &dir_path, const std::string &file_name,
+                     struct Checkpoint_s &&checkpoint) {
 
-    H5Easy::dump(file, "/MetaParam/Iterations", checkpoint.iteration);
-    H5Easy::dump(file, "/Grid/Names", checkpoint.field.GetProps());
-    H5Easy::dump(file, "/Grid/Chemistry", checkpoint.field.As2DVector());
+  if (!fs::exists(dir_path)) {
+    std::cerr << "Directory does not exist: " << dir_path << std::endl;
+    return -1;
+  }
+  fs::path file_path = fs::path(dir_path) / file_name;
+  // TODO: errorhandling
+  H5Easy::File file(file_path, H5Easy::File::Overwrite);
 
-    return 0;
+  H5Easy::dump(file, "/MetaParam/Iterations", checkpoint.iteration);
+  H5Easy::dump(file, "/Grid/Names", checkpoint.field.GetProps());
+  H5Easy::dump(file, "/Grid/Chemistry", checkpoint.field.As2DVector());
+
+  return 0;
 }
 
-int read_checkpoint(const std::string &dir_path, const std::string &file_name, struct Checkpoint_s &checkpoint){
-    
-    fs::path file_path = fs::path(dir_path) / file_name;
+int read_checkpoint(const std::string &dir_path, const std::string &file_name,
+                    struct Checkpoint_s &checkpoint) {
 
-    if (!fs::exists(file_path)) {
-        std::cerr << "File does not exist: " << file_path << std::endl;
-        return -1;
-    }
-     
-    H5Easy::File file(file_path, H5Easy::File::ReadOnly);
+  fs::path file_path = fs::path(dir_path) / file_name;
 
-     checkpoint.iteration = H5Easy::load<uint32_t>(file, "/MetaParam/Iterations");
+  if (!fs::exists(file_path)) {
+    std::cerr << "File does not exist: " << file_path << std::endl;
+    return -1;
+  }
 
-     checkpoint.field = H5Easy::load<std::vector<std::vector<double>>>(file, "/Grid/Chemistry");
+  H5Easy::File file(file_path, H5Easy::File::ReadOnly);
 
-    return 0;
+  checkpoint.iteration = H5Easy::load<uint32_t>(file, "/MetaParam/Iterations");
+
+  checkpoint.field =
+      H5Easy::load<std::vector<std::vector<double>>>(file, "/Grid/Chemistry");
+
+  return 0;
 }
 

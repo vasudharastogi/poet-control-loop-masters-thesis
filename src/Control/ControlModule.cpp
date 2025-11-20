@@ -34,25 +34,25 @@ void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem,
       MSG("Rollback counter: " + std::to_string(disable_surr_counter));
     } else {
       rollback_enabled = false;
+      MSG("Rollback stabilization complete, re-enabling surrogates");
     }
   }
-  
+
   bool prev_stab_state = chem.GetStabEnabled();
-  
+
   // user requested DHT/INTEP? keep them disabled but enable warmup-phase so
   if (global_iteration <= config.stab_interval || rollback_enabled) {
     chem.SetStabEnabled(true);
     chem.SetDhtEnabled(false);
     chem.SetInterpEnabled(false);
-    return;
+  } else {
+    chem.SetStabEnabled(false);
+    chem.SetDhtEnabled(dht_enabled);
+    chem.SetInterpEnabled(interp_enabled);
   }
-  
-  chem.SetStabEnabled(false);
-  chem.SetDhtEnabled(dht_enabled);
-  chem.SetInterpEnabled(interp_enabled);
-  
-  // Mark that we need to broadcast flags if stab phase just ended
-  if (prev_stab_state && !chem.GetStabEnabled()) {
+
+  // Mark that we need to broadcast flags if stab state changed
+  if (prev_stab_state != chem.GetStabEnabled()) {
     stab_phase_ended = true;
   }
 }
@@ -63,8 +63,10 @@ void poet::ControlModule::writeCheckpoint(DiffusionModule &diffusion,
   double w_check_a, w_check_b;
 
   w_check_a = MPI_Wtime();
-  write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
-                   {.field = diffusion.getField(), .iteration = iter});
+  if (global_iteration % config.checkpoint_interval == 0) {
+    write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
+                     {.field = diffusion.getField(), .iteration = iter});
+  }
   w_check_b = MPI_Wtime();
   this->w_check_t += w_check_b - w_check_a;
 
@@ -92,7 +94,8 @@ void poet::ControlModule::writeErrorMetrics(
   double stats_a, stats_b;
 
   stats_a = MPI_Wtime();
-  writeStatsToCSV(metrics_history, species, out_dir, "metrics_overview");
+  writeStatsToCSV(metrics_history, species, out_dir, "overview");
+  write_metrics(metrics_history, species, out_dir, "metrics_overview");
   stats_b = MPI_Wtime();
 
   this->stats_t += stats_b - stats_a;
@@ -106,7 +109,13 @@ uint32_t poet::ControlModule::getRollbackIter() {
   uint32_t rollback_iter = (last_iter <= last_checkpoint_written)
                                ? last_iter
                                : last_checkpoint_written;
-  return rollback_iter;
+
+  MSG("getRollbackIter: global_iteration=" + std::to_string(global_iteration) +
+      ", checkpoint_interval=" + std::to_string(config.checkpoint_interval) +
+      ", last_checkpoint_written=" + std::to_string(last_checkpoint_written) +
+      ", returning=" + std::to_string(last_checkpoint_written));
+
+  return last_checkpoint_written;
 }
 
 std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
@@ -116,7 +125,10 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
   if (metrics_history.empty()) {
     MSG("No error history yet, skipping rollback check.");
     rollback_enabled = false;
-    // flush_request = false;
+    return std::nullopt;
+  }
+  // Skip threshold checking if already in rollback/stabilization phase
+  if (rollback_enabled) {
     return std::nullopt;
   }
 
@@ -147,7 +159,7 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
     }
   }
   rollback_enabled = false;
-  // flush_request = false;
+  flush_request = false;
   return std::nullopt;
 }
 
@@ -155,6 +167,11 @@ void poet::ControlModule::computeErrorMetrics(
     std::vector<std::vector<double>> &reference_values,
     std::vector<std::vector<double>> &surrogate_values,
     const std::vector<std::string> &species) {
+
+  // Skip metric computation if already in rollback/stabilization phase
+  if (rollback_enabled) {
+    return;
+  }
 
   const uint32_t n_cells = reference_values.size();
 
@@ -166,23 +183,18 @@ void poet::ControlModule::computeErrorMetrics(
     metrics.id.push_back(reference_values[cell_i][0]);
 
     for (size_t sp_i = 0; sp_i < species.size(); sp_i++) {
-      const double ref_value = reference_values[cell_i][sp_i];
-      const double sur_value = surrogate_values[cell_i][sp_i];
+      const double ref_value = reference_values[cell_i][sp_i + 1];
+      const double sur_value = surrogate_values[cell_i][sp_i + 1];
       const double ZERO_ABS = config.zero_abs;
 
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
-        metrics.mape[cell_i][sp_i] = 0.0;
-        metrics.rrmse[cell_i][sp_i] = 0.0;
         continue;
       }
 
       if (std::abs(ref_value) < ZERO_ABS) {
         if (std::abs(sur_value) >= ZERO_ABS) {
-          metrics.mape[cell_i][sp_i] = 1.0;
+          metrics.mape[cell_i][sp_i] = 100.0;
           metrics.rrmse[cell_i][sp_i] = 1.0;
-        } else {
-          metrics.mape[cell_i][sp_i] = 0.0;
-          metrics.rrmse[cell_i][sp_i] = 0.0;
         }
       } else {
         double alpha = 1.0 - (sur_value / ref_value);
@@ -191,11 +203,7 @@ void poet::ControlModule::computeErrorMetrics(
       }
     }
   }
-
-  std::cout << "[DEBUG] metrics.id.size()=" << metrics.id.size() << std::endl;
   metrics_history.push_back(metrics);
-  std::cout << "[DEBUG] metricsHistory.size()=" << metrics_history.size()
-            << std::endl;
 }
 
 void poet::ControlModule::processCheckpoint(
@@ -221,15 +229,10 @@ bool poet::ControlModule::shouldBcastFlags() {
   if (global_iteration == 1) {
     return true;
   }
-  
+
   if (stab_phase_ended) {
-    stab_phase_ended = false;  
     return true;
   }
-  
-  if (flush_request) {
-    return true;
-  }
-  
+
   return false;
 }

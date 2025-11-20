@@ -443,13 +443,13 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
               MPI_INT);
   }
 
-  if (control->shouldBcastFlags()) {
-    int ftype = CHEM_CTRL_FLAGS;
-    PropagateFunctionType(ftype);
-    uint32_t ctrl_flags = buildCtrlFlags(
-        this->dht_enabled, this->interp_enabled, this->stab_enabled);
-    ChemBCast(&ctrl_flags, 1, MPI_INT);
-  }
+  // if (control->shouldBcastFlags()) {
+  ftype = CHEM_CTRL_FLAGS;
+  PropagateFunctionType(ftype);
+  uint32_t ctrl_flags = buildCtrlFlags(this->dht_enabled, this->interp_enabled,
+                                       this->stab_enabled);
+  ChemBCast(&ctrl_flags, 1, MPI_INT);
+  //}
 
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
@@ -522,8 +522,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-  std::cout << "[DEBUG] control_batch.size() = " 
-          << this->control_batch.size() << std::endl;
+  std::cout << "[DEBUG] control_batch.size() = " << this->control_batch.size()
+            << std::endl;
 
   if (!this->control_batch.empty()) {
     std::cout << "[Master] Processing " << this->control_batch.size()
@@ -551,7 +551,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     metrics_a = MPI_Wtime();
     control->computeErrorMetrics(this->control_batch, surrogate_batch,
                                  prop_names);
-
     control->writeErrorMetrics(ctrl_file_out_dir, prop_names);
 
     metrics_b = MPI_Wtime();
