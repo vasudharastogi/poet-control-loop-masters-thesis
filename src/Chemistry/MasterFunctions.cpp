@@ -522,8 +522,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-  std::cout << "[DEBUG] control_batch.size() = " << this->control_batch.size()
-            << std::endl;
 
   if (!this->control_batch.empty()) {
     std::cout << "[Master] Processing " << this->control_batch.size()

@@ -1,4 +1,5 @@
 #include <string>
+#include <vector>
 
 void writeSpeciesStatsToCSV(
     const std::vector<poet::SpeciesErrorMetrics> &all_stats,

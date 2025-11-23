@@ -27,8 +27,12 @@ int write_metrics(const std::vector<poet::CellErrorMetrics> &metrics_history,
 
   for (size_t idx = 0; idx < metrics_history.size(); ++idx) {
     const auto &metrics = metrics_history[idx];
-    std::string grp = "entry_" + std::to_string(idx) + "_iter_" + 
+    /*
+    std::string grp = "entry_" + std::to_string(idx) + "_iter_" +
                       std::to_string(metrics.iteration) + "_rb_" +
+                      std::to_string(metrics.rollback_count);
+    */
+    std::string grp = "iter_" + std::to_string(metrics.iteration) + "_rb_" +
                       std::to_string(metrics.rollback_count);
 
     size_t n_cells = metrics.id.size();
@@ -37,23 +41,28 @@ int write_metrics(const std::vector<poet::CellErrorMetrics> &metrics_history,
     H5Easy::dump(file, grp + "/meta", 0, H5Easy::DumpMode::Overwrite);
 
     // Attach attributes
-    H5Easy::dumpAttribute(file, grp + "/meta", "species_names", species_names, H5Easy::DumpMode::Overwrite);
-    H5Easy::dumpAttribute(file, grp + "/meta", "iteration", metrics.iteration, H5Easy::DumpMode::Overwrite);
+    H5Easy::dumpAttribute(file, grp + "/meta", "species_names", species_names,
+                          H5Easy::DumpMode::Overwrite);
+    H5Easy::dumpAttribute(file, grp + "/meta", "iteration", metrics.iteration,
+                          H5Easy::DumpMode::Overwrite);
     H5Easy::dumpAttribute(file, grp + "/meta", "rollback_count",
                           metrics.rollback_count, H5Easy::DumpMode::Overwrite);
-    H5Easy::dumpAttribute(file, grp + "/meta", "n_cells", n_cells, H5Easy::DumpMode::Overwrite);
-    H5Easy::dumpAttribute(file, grp + "/meta", "n_species", n_species, H5Easy::DumpMode::Overwrite);
+    H5Easy::dumpAttribute(file, grp + "/meta", "n_cells", n_cells,
+                          H5Easy::DumpMode::Overwrite);
+    H5Easy::dumpAttribute(file, grp + "/meta", "n_species", n_species,
+                          H5Easy::DumpMode::Overwrite);
 
     // ─────────────────────────────────────────────
     // 2. Real datasets
     // ─────────────────────────────────────────────
-    H5Easy::dump(file, grp + "/mape", metrics.mape, H5Easy::DumpMode::Overwrite);
-    H5Easy::dump(file, grp + "/rrmse", metrics.rrmse, H5Easy::DumpMode::Overwrite);
+    H5Easy::dump(file, grp + "/mape", metrics.mape,
+                 H5Easy::DumpMode::Overwrite);
+    H5Easy::dump(file, grp + "/rrmse", metrics.rrmse,
+                 H5Easy::DumpMode::Overwrite);
   }
 
   return 0;
 }
-
 
 void writeCellStatsToCSV(const std::vector<poet::CellErrorMetrics> &all_stats,
                          const std::vector<std::string> &species_names,

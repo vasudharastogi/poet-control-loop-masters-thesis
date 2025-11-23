@@ -151,8 +151,6 @@ void poet::ChemistryModule::processCtrlPkgs(
   WorkerRunWorkPackage(control_wp, current_sim_time, dt);
   phreeqc_end = MPI_Wtime();
 
-  std::cout << "PQC RAN" << std::endl;
-
   timings.ctrl_phreeqc_t += phreeqc_end - phreeqc_start;
 
   copyPkgs(control_wp, mpi_buffer);

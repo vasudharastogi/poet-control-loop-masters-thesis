@@ -96,8 +96,8 @@ void poet::ControlModule::writeErrorMetrics(
   stats_a = MPI_Wtime();
   writeSpeciesStatsToCSV(metrics_history, species, out_dir,
                          "species_overview.csv");
-  writeCellStatsToCSV(cell_metrics_history, species, out_dir,
-                      "cell_overview.csv");
+  // writeCellStatsToCSV(cell_metrics_history, species, out_dir,
+  // "cell_overview.csv");
   write_metrics(cell_metrics_history, species, out_dir,
                 "metrics_overview.hdf5");
   stats_b = MPI_Wtime();
@@ -110,6 +110,7 @@ uint32_t poet::ControlModule::getRollbackIter() {
   uint32_t last_iter = ((global_iteration - 1) / config.checkpoint_interval) *
                        config.checkpoint_interval;
 
+  /*
   uint32_t rollback_iter = (last_iter <= last_checkpoint_written)
                                ? last_iter
                                : last_checkpoint_written;
@@ -120,6 +121,8 @@ uint32_t poet::ControlModule::getRollbackIter() {
       ", returning=" + std::to_string(last_checkpoint_written));
 
   return last_checkpoint_written;
+  */
+  return last_iter;
 }
 
 std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
@@ -140,7 +143,8 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
 
   for (size_t sp_i = 2; sp_i < species.size(); sp_i++) {
 
-    if (s_mape[sp_i] == 0) {
+    // skip charge
+    if (s_mape[sp_i] == 0 || sp_i == 4) {
       continue;
     }
     if (s_mape[sp_i] > config.mape_threshold[sp_i]) {
@@ -201,6 +205,8 @@ void poet::ControlModule::computeErrorMetrics(
   for (size_t cell_i = 0; cell_i < n_cells; cell_i++) {
 
     c_metrics.id.push_back(reference_values[cell_i][0]);
+    c_metrics.mape[cell_i][0] = reference_values[cell_i][0];
+    c_metrics.rrmse[cell_i][0] = reference_values[cell_i][0];
 
     for (size_t sp_i = 2; sp_i < n_species; sp_i++) {
       const double ref_value = reference_values[cell_i][sp_i];
@@ -226,6 +232,14 @@ void poet::ControlModule::computeErrorMetrics(
 
         c_metrics.mape[cell_i][sp_i] = 100.0 * std::abs(alpha);
         c_metrics.rrmse[cell_i][sp_i] = alpha * alpha;
+        // Log extreme MAPE values for debugging
+        if (c_metrics.mape[cell_i][sp_i] > 100.0) {
+          std::cout << "WARNING: High MAPE detected - Cell="
+                    << c_metrics.id[cell_i] << ", Species=" << species[sp_i]
+                    << ", MAPE=" << c_metrics.mape[cell_i][sp_i]
+                    << "%, Ref=" << ref_value << ", Sur=" << sur_value
+                    << ", Alpha=" << alpha << std::endl;
+        }
       }
     }
   }
@@ -242,7 +256,7 @@ void poet::ControlModule::processCheckpoint(
     DiffusionModule &diffusion, uint32_t &current_iter,
     const std::string &out_dir, const std::vector<std::string> &species) {
 
-  if (flush_request) {
+  if (flush_request && rollback_count < 3) {
     uint32_t target = getRollbackIter();
     readCheckpoint(diffusion, current_iter, target, out_dir);
 
