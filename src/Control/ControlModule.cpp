@@ -164,8 +164,13 @@ void poet::ControlModule::computeErrorMetrics(
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
         continue;
       }
-      if (std::abs(ref_value) < ZERO_ABS) {
-        if (std::abs(sur_value) >= ZERO_ABS) {
+
+      if (!std::isfinite(ref_value) || !std::isfinite(sur_value)) {
+        continue;
+      }
+
+      if (std::abs(ref_value) == ZERO_ABS) {
+        if (std::abs(sur_value) != ZERO_ABS) {
           err_sum += 1.0;
           sqr_err_sum += 1.0;
         }
@@ -173,12 +178,17 @@ void poet::ControlModule::computeErrorMetrics(
       // Both zero: skip
       else {
         double alpha = 1.0 - (sur_value / ref_value);
+        if (!std::isfinite(alpha)) {
+          continue; // protects against inf/NaN due to extreme values
+        }
+
         err_sum += std::abs(alpha);
         sqr_err_sum += alpha * alpha;
       }
     }
-    metrics.mape[i] = 100.0 * (err_sum / size_per_prop);
-    metrics.rrmse[i] = std::sqrt(sqr_err_sum / size_per_prop);
+    metrics.mape[i] = 100.0 * (err_sum / static_cast<double>(size_per_prop));
+    metrics.rrmse[i] =
+        std::sqrt(sqr_err_sum / static_cast<double>(size_per_prop));
   }
   metrics_history.push_back(metrics);
 }
