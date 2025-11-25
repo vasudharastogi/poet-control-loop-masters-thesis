@@ -59,30 +59,6 @@ void poet::ChemistryModule::WorkerLoop() {
                 MPI_INT, 0, this->group_comm);
       break;
     }
-    /*
-    case CHEM_WARMUP_PHASE: {
-      int warmup_flag = 0;
-      ChemBCast(&warmup_flag, 1, MPI_INT);
-      this->warmup_enabled = (warmup_flag == 1);
-      //std::cout << "Warmup phase is  " << this->warmup_enabled << std::endl;
-      break;
-    }
-    case CHEM_DHT_ENABLE: {
-      int dht_flag = 0;
-      ChemBCast(&dht_flag, 1, MPI_INT);
-      this->dht_enabled = (dht_flag == 1);
-      //std::cout << "DHT_enabled is " << this->dht_enabled << std::endl;
-      break;
-    }
-    case CHEM_IP_ENABLE: {
-      int interp_flag = 0;
-      ChemBCast(&interp_flag, 1, MPI_INT);
-      this->interp_enabled = (interp_flag == 1);
-      ;
-      std::cout << "Interp_enabled is " << this->interp_enabled << std::endl;
-      break;
-    }
-      */
     case CHEM_CTRL_ENABLE: {
       int ctrl = 0;
       ChemBCast(&ctrl, 1, MPI_INT);
@@ -97,7 +73,6 @@ void poet::ChemistryModule::WorkerLoop() {
       this->stab_enabled = hasFlag(flags, STAB_ENABLE);
       break;
     }
-
     case CHEM_WORK_LOOP: {
       WorkerProcessPkgs(timings, iteration);
       break;
