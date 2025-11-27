@@ -7,23 +7,21 @@
 poet::ControlModule::ControlModule(const ControlConfig &config_)
     : config(config_) {}
 
-void poet::ControlModule::beginIteration(ChemistryModule &chem,
-                                         const uint32_t &iter,
+void poet::ControlModule::beginIteration(ChemistryModule &chem, uint32_t &iter,
                                          const bool &dht_enabled,
                                          const bool &interp_enabled) {
 
-  /* dht_enabled and inter_enabled are user settings set before startig the
-   * simulation*/
+  global_iteration = iter;
   double prep_a, prep_b;
 
   prep_a = MPI_Wtime();
 
-  global_iteration = iter;
   updateStabilizationPhase(chem, dht_enabled, interp_enabled);
   prep_b = MPI_Wtime();
   this->prep_t += prep_b - prep_a;
 }
 
+/* Disables dht and/or interp during stabilzation phase */
 void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem,
                                                    bool dht_enabled,
                                                    bool interp_enabled) {
@@ -31,16 +29,15 @@ void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem,
     if (disable_surr_counter > 0) {
       --disable_surr_counter;
       flush_request = false;
-      MSG("Rollback counter: " + std::to_string(disable_surr_counter));
+      std::cout << "Rollback counter: " << std::to_string(disable_surr_counter)
+                << std::endl;
     } else {
       rollback_enabled = false;
-      MSG("Rollback stabilization complete, re-enabling surrogates");
+      std::cout << "Rollback stabilization complete, re-enabling surrogate."
+                << std::endl;
     }
   }
 
-  bool prev_stab_state = chem.GetStabEnabled();
-
-  // user requested DHT/INTEP? keep them disabled but enable warmup-phase so
   if (global_iteration <= config.stab_interval || rollback_enabled) {
     chem.SetStabEnabled(true);
     chem.SetDhtEnabled(false);
@@ -50,27 +47,19 @@ void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem,
     chem.SetDhtEnabled(dht_enabled);
     chem.SetInterpEnabled(interp_enabled);
   }
-
-  // Mark that we need to broadcast flags if stab state changed
-  if (prev_stab_state != chem.GetStabEnabled()) {
-    stab_phase_ended = true;
-  }
 }
 
 void poet::ControlModule::writeCheckpoint(DiffusionModule &diffusion,
                                           uint32_t &iter,
                                           const std::string &out_dir) {
-  double w_check_a, w_check_b;
-
-  w_check_a = MPI_Wtime();
   if (global_iteration % config.checkpoint_interval == 0) {
+    double w_check_a = MPI_Wtime();
     write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
                      {.field = diffusion.getField(), .iteration = iter});
+    double w_check_b = MPI_Wtime();
+    this->w_check_t += w_check_b - w_check_a;
+    last_checkpoint_written = iter;
   }
-  w_check_b = MPI_Wtime();
-  this->w_check_t += w_check_b - w_check_a;
-
-  last_checkpoint_written = iter;
 }
 
 void poet::ControlModule::readCheckpoint(DiffusionModule &diffusion,
@@ -90,18 +79,15 @@ void poet::ControlModule::readCheckpoint(DiffusionModule &diffusion,
 }
 
 void poet::ControlModule::writeErrorMetrics(
-    const std::string &out_dir, const std::vector<std::string> &species) {
-  double stats_a, stats_b;
+    uint32_t &iter, const std::string &out_dir,
+    const std::vector<std::string> &species) {
 
-  stats_a = MPI_Wtime();
+  double stats_a = MPI_Wtime();
   writeSpeciesStatsToCSV(metrics_history, species, out_dir,
                          "species_overview.csv");
-  // writeCellStatsToCSV(cell_metrics_history, species, out_dir,
-  // "cell_overview.csv");
   write_metrics(cell_metrics_history, species, out_dir,
                 "metrics_overview.hdf5");
-  stats_b = MPI_Wtime();
-
+  double stats_b = MPI_Wtime();
   this->stats_t += stats_b - stats_a;
 }
 
@@ -109,19 +95,6 @@ uint32_t poet::ControlModule::getRollbackIter() {
 
   uint32_t last_iter = ((global_iteration - 1) / config.checkpoint_interval) *
                        config.checkpoint_interval;
-
-  /*
-  uint32_t rollback_iter = (last_iter <= last_checkpoint_written)
-                               ? last_iter
-                               : last_checkpoint_written;
-
-  MSG("getRollbackIter: global_iteration=" + std::to_string(global_iteration) +
-      ", checkpoint_interval=" + std::to_string(config.checkpoint_interval) +
-      ", last_checkpoint_written=" + std::to_string(last_checkpoint_written) +
-      ", returning=" + std::to_string(last_checkpoint_written));
-
-  return last_checkpoint_written;
-  */
   return last_iter;
 }
 
@@ -129,55 +102,47 @@ std::optional<uint32_t> poet::ControlModule::getRollbackTarget(
     const std::vector<std::string> &species) {
   double r_check_a, r_check_b;
 
-  if (metrics_history.empty()) {
-    MSG("No error history yet, skipping rollback check.");
-    rollback_enabled = false;
-    return std::nullopt;
-  }
-  // Skip threshold checking if already in rollback/stabilization phase
-  if (rollback_enabled) {
+  /* Skip threshold checking if already in stabilization phase*/
+  if (metrics_history.empty() || rollback_enabled) {
     return std::nullopt;
   }
 
-  const auto &s_mape = metrics_history.back().mape;
+  const auto &s_hist = metrics_history.back();
 
+  /* skipping cell_id and id */
   for (size_t sp_i = 2; sp_i < species.size(); sp_i++) {
 
-    // skip charge
-    if (s_mape[sp_i] == 0 || sp_i == 4) {
+    /* check bounds of threshold vector*/
+    if (sp_i >= config.mape_threshold.size()) {
+      std::cerr << "Warning: No threshold defined for species " << species[sp_i]
+                << " at index " << std::to_string(sp_i) << std::endl;
       continue;
     }
-    if (s_mape[sp_i] > config.mape_threshold[sp_i]) {
-      if (last_checkpoint_written == 0) {
-        MSG(" Threshold exceeded but no checkpoint exists yet.");
-        return std::nullopt;
-      }
+    if (s_hist.mape[sp_i] > config.mape_threshold[sp_i]) {
 
-      const auto &c_mape = cell_metrics_history.back().mape;
-      const auto &c_id = cell_metrics_history.back().id;
-
+      const auto &c_hist = cell_metrics_history.back();
       auto max_it = std::max_element(
-          c_mape.begin(), c_mape.end(),
+          c_hist.mape.begin(), c_hist.mape.end(),
           [sp_i](const auto &a, const auto &b) { return a[sp_i] < b[sp_i]; });
 
-      size_t max_idx = std::distance(c_mape.begin(), max_it);
-      uint32_t cell_id = c_id[max_idx];
+      size_t max_idx = std::distance(c_hist.mape.begin(), max_it);
+      uint32_t cell_id = c_hist.id[max_idx];
       double cell_mape = (*max_it)[sp_i];
 
       rollback_enabled = true;
       flush_request = true;
 
-      MSG("Threshold exceeded for " + species[sp_i] +
-          " with species-level MAPE = " + std::to_string(s_mape[sp_i]) +
-          " exceeding threshold = " +
-          std::to_string(config.mape_threshold[sp_i]) + ". Worst cell: ID=" +
-          std::to_string(cell_id) + " with MAPE=" + std::to_string(cell_mape));
+      std::cout << "Threshold exceeded for " << species[sp_i]
+                << " with species-level MAPE = " << std::to_string(s_hist.mape[sp_i])
+                << " exceeding threshold = "
+                << std::to_string(config.mape_threshold[sp_i])
+                << ". Worst cell: ID=" << std::to_string(cell_id)
+                << ", species= " << species[sp_i] 
+                << " with MAPE=" << std::to_string(cell_mape) << std::endl;
 
       return getRollbackIter();
     }
   }
-  rollback_enabled = false;
-  flush_request = false;
   return std::nullopt;
 }
 
@@ -185,11 +150,6 @@ void poet::ControlModule::computeErrorMetrics(
     std::vector<std::vector<double>> &reference_values,
     std::vector<std::vector<double>> &surrogate_values,
     const std::vector<std::string> &species, const uint32_t size_per_prop) {
-
-  // Skip metric computation if already in rollback/stabilization phase
-  if (rollback_enabled) {
-    return;
-  }
 
   const uint32_t n_cells = reference_values.size();
   const uint32_t n_species = species.size();
@@ -256,7 +216,11 @@ void poet::ControlModule::processCheckpoint(
     DiffusionModule &diffusion, uint32_t &current_iter,
     const std::string &out_dir, const std::vector<std::string> &species) {
 
-  if (flush_request && rollback_count < 3) {
+  // Use max_rollbacks from config, default to 3 if not set
+  // uint32_t max_rollbacks =
+  //  (config.max_rollbacks > 0) ? config.max_rollbacks : 3;
+
+  if (flush_request /* && rollback_count < 3 */) {
     uint32_t target = getRollbackIter();
     readCheckpoint(diffusion, current_iter, target, out_dir);
 
@@ -264,21 +228,10 @@ void poet::ControlModule::processCheckpoint(
     rollback_count++;
     disable_surr_counter = config.stab_interval;
 
-    MSG("Restored checkpoint " + std::to_string(target) +
-        ", surrogates disabled for " + std::to_string(config.stab_interval));
+    std::cout << "Restored checkpoint " << std::to_string(target)
+              << ", surrogate disabled for "
+              << std::to_string(config.stab_interval) << std::endl;
   } else {
     writeCheckpoint(diffusion, global_iteration, out_dir);
   }
-}
-
-bool poet::ControlModule::shouldBcastFlags() {
-  if (global_iteration == 1) {
-    return true;
-  }
-
-  if (stab_phase_ended) {
-    return true;
-  }
-
-  return false;
 }

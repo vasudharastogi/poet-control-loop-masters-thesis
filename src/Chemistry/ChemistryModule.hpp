@@ -473,7 +473,7 @@ protected:
   bool control_enabled{false};
   bool stab_enabled{false};
   std::unordered_set<uint32_t> ctrl_cell_ids;
-  std::vector<std::vector<double>> control_batch;
+  std::vector<std::vector<double>> ctrl_batch;
 };
 } // namespace poet
 

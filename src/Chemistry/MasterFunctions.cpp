@@ -368,7 +368,7 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
         std::vector<double> cell_output(
             recv_buffer.begin() + this->prop_count * i,
             recv_buffer.begin() + this->prop_count * (i + 1));
-        this->control_batch.push_back(std::move(cell_output));
+        this->ctrl_batch.push_back(std::move(cell_output));
       }
       break;
     }
@@ -443,13 +443,11 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
               MPI_INT);
   }
 
-  // if (control->shouldBcastFlags()) {
   ftype = CHEM_CTRL_FLAGS;
   PropagateFunctionType(ftype);
   uint32_t ctrl_flags = buildCtrlFlags(this->dht_enabled, this->interp_enabled,
                                        this->stab_enabled);
   ChemBCast(&ctrl_flags, 1, MPI_INT);
-  //}
 
   ftype = CHEM_WORK_LOOP;
   PropagateFunctionType(ftype);
@@ -466,8 +464,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   std::vector<double> mpi_buffer =
       shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
                    wp_sizes_vector.size());
-
-  // this->mpi_surr_buffer.resize(mpi_buffer.size());
 
   /* setup local variables */
   pkg_to_send = wp_sizes_vector.size();
@@ -523,39 +519,37 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
   /* do master stuff */
 
-  if (!this->control_batch.empty()) {
-    std::cout << "[Master] Processing " << this->control_batch.size()
+  if (!this->ctrl_batch.empty()) {
+    std::cout << "[Master] Processing " << this->ctrl_batch.size()
               << " control cells for comparison." << std::endl;
 
-    /* using mpi-buffer because we need cell-major layout*/
-    std::vector<std::vector<double>> surrogate_batch;
-    surrogate_batch.reserve(this->control_batch.size());
+    
+    std::vector<std::vector<double>> sur_batch;
+    sur_batch.reserve(this->ctrl_batch.size());
 
-    for (const auto &element : this->control_batch) {
+    for (const auto &element : this->ctrl_batch) {
 
+      /* using mpi-buffer because we need cell-major layout*/
       for (size_t i = 0; i < this->n_cells; i++) {
         uint32_t curr_cell_id = mpi_buffer[this->prop_count * i];
 
         if (curr_cell_id == element[0]) {
-          std::vector<double> surrogate_output(
+          std::vector<double> sur_output(
               mpi_buffer.begin() + this->prop_count * i,
               mpi_buffer.begin() + this->prop_count * (i + 1));
-          surrogate_batch.push_back(surrogate_output);
+          sur_batch.push_back(sur_output);
           break;
         }
       }
     }
 
     metrics_a = MPI_Wtime();
-    control->computeErrorMetrics(this->control_batch, surrogate_batch,
+    control->computeErrorMetrics(this->ctrl_batch, sur_batch,
                                  prop_names, n_cells);
-    control->writeErrorMetrics(ctrl_file_out_dir, prop_names);
-
     metrics_b = MPI_Wtime();
     this->metrics_t += metrics_b - metrics_a;
 
-    // Clear for next control iteration
-    this->control_batch.clear();
+    this->ctrl_batch.clear();
   }
 
   /* start time measurement of master chemistry */

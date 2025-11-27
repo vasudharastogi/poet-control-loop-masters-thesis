@@ -19,7 +19,8 @@ class DiffusionModule;
 
 struct ControlConfig {
   uint32_t stab_interval = 0;
-  uint32_t checkpoint_interval = 0;
+  uint32_t checkpoint_interval = 0; // How often to write metrics files
+  //uint32_t max_rb = 0;            // Maximum number of rollbacks allowed
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };
@@ -54,10 +55,10 @@ class ControlModule {
 public:
   explicit ControlModule(const ControlConfig &config);
 
-  void beginIteration(ChemistryModule &chem, const uint32_t &iter,
+  void beginIteration(ChemistryModule &chem, uint32_t &iter,
                       const bool &dht_enabled, const bool &interp_enaled);
 
-  void writeErrorMetrics(const std::string &out_dir,
+  void writeErrorMetrics(uint32_t &iter, const std::string &out_dir,
                          const std::vector<std::string> &species);
 
   std::optional<uint32_t> getRollbackTarget();

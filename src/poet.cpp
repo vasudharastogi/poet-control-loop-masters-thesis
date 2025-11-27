@@ -254,8 +254,7 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
     params.stab_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("stab_interval"));
-    params.zero_abs =
-        Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
+    params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
     params.ctrl_cell_ids = Rcpp::as<std::vector<uint32_t>>(
@@ -415,9 +414,9 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
+    control.writeErrorMetrics(iter, params.out_dir, chem.getField().GetProps());
     control.processCheckpoint(diffusion, iter, params.out_dir,
                               chem.getField().GetProps());
-
     // MSG();
   } // END SIMULATION LOOP
 
@@ -434,13 +433,22 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   Rcpp::List diffusion_profiling;
   diffusion_profiling["simtime"] = diffusion.getTransportTime();
 
-  if (params.use_dht) {
-    chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
-    chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
-    chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
-    chem_profiling["dht_fill_time"] =
-        Rcpp::wrap(chem.GetWorkerDHTFillTimings());
-  }
+  Rcpp::List ctrl_profiling;
+  ctrl_profiling["compute_metrics_master"] = chem.GetMasterCtrlMetricsTime();
+  ctrl_profiling["unshuffle_field_master"] = chem.GetMasterUnshuffleTime();
+  ctrl_profiling["w_checkpoint_master"] = control.getWriteCheckpointTime();
+  ctrl_profiling["r_checkpoint_master"] = control.getReadCheckpointTime();
+  ctrl_profiling["write_stats"] = control.getWriteMetricsTime();
+  ctrl_profiling["ctrl_logic_master"] = control.getUpdateCtrlLogicTime();
+  ctrl_profiling["recv_data_master"] = chem.GetMasterRecvCtrlDataTime();
+  ctrl_profiling["worker"] = Rcpp::wrap(chem.GetWorkerControlTimings());
+
+  // if (params.use_dht) {
+  chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
+  chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
+  chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
+  chem_profiling["dht_fill_time"] = Rcpp::wrap(chem.GetWorkerDHTFillTimings());
+  //}
 
   if (params.use_interp) {
     chem_profiling["interp_w"] =
@@ -460,6 +468,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   profiling["simtime"] = dSimTime;
   profiling["chemistry"] = chem_profiling;
   profiling["diffusion"] = diffusion_profiling;
+  profiling["control"] = ctrl_profiling;
 
   chem.MasterLoopBreak();
 
