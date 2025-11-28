@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=proto2_eps0035_no_rb_v2
+#SBATCH --job-name=proto2_eps0035
 #SBATCH --output=proto2_eps0035_no_rb_v2_%j.out
 #SBATCH --error=proto2_eps0035_no_rb_v2%j.err
 #SBATCH --partition=long
@@ -15,5 +15,5 @@ module purge
 module load cmake gcc openmpi
 
 #mpirun -n 144 ./poet dolo_fgcs_3.R dolo_fgcs_3.qs2 dolo_only_pqc
-mpirun -n 144 ./poet --interp --rds dolo_fgcs_3_rt.R dolo_fgcs_3.qs2 proto2_eps0035_no_rb_v2
+mpirun -n 144 ./poet --interp --rds dolo_fgcs_3_rt.R dolo_fgcs_3.qs2 proto2_eps0035
 #mpirun -n 144 ./poet --interp  barite_fgcs_4_new/barite_fgcs_4_new_rt.R barite_fgcs_4_new/barite_fgcs_4_new.qs2 barite
