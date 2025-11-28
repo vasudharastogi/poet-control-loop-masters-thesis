@@ -88,12 +88,12 @@ dht_species <- c(
 )
 
 pht_species <- c(
-  "Ba"        = 4,
+  "Ba"        = 3,
   "Cl"        = 3,
   "S"         = 3,
   "Sr"        = 3,
-  "Barite"    = 2,
-  "Celestite" = 2
+  "Barite"    = 1,
+  "Celestite" = 1
 )
 
 chemistry_setup <- list(
