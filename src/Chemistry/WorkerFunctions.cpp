@@ -60,17 +60,17 @@ void poet::ChemistryModule::WorkerLoop() {
       break;
     }
     case CHEM_CTRL_ENABLE: {
-      int ctrl = 0;
-      ChemBCast(&ctrl, 1, MPI_INT);
-      this->control_enabled = (ctrl == 1);
+      uint32_t ctrl = 0;
+      ChemBCast(&ctrl, 1, MPI_UINT32_T);
+      ctrl_enabled = (ctrl == 1);
       break;
     }
     case CHEM_CTRL_FLAGS: {
-      int flags = 0;
-      ChemBCast(&flags, 1, MPI_INT);
-      this->dht_enabled = hasFlag(flags, DHT_ENABLE);
-      this->interp_enabled = hasFlag(flags, IP_ENABLE);
-      this->stab_enabled = hasFlag(flags, STAB_ENABLE);
+      uint32_t flags = 0;
+      ChemBCast(&flags, 1, MPI_UINT32_T);
+      dht_enabled = hasFlag(flags, DHT_ENABLE);
+      interp_enabled = hasFlag(flags, IP_ENABLE);
+      stab_enabled = hasFlag(flags, STAB_ENABLE);
       break;
     }
     case CHEM_WORK_LOOP: {
@@ -204,21 +204,10 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   // current work package start location in field
   wp_start_index = mpi_buffer[count + 4];
 
-  // read packed control flags
   /*
-  flags = static_cast<int>(mpi_buffer[count + 5]);
-  this->interp_enabled = (flags & 1) != 0;
-  this->dht_enabled = (flags & 2) != 0;
-  this->warmup_enabled = (flags & 4) != 0;
-  this->control_enabled = (flags & 8) != 0;
-  */
-
-  /*
-
-  std::cout << "warmup_enabled is " << stab_enabled << ", control_enabled is "
-            << control_enabled << ", dht_enabled is " << dht_enabled
+  std::cout << "warmup_enabled is " << stab_enabled << ", ctrl_enabled is "
+            << ctrl_enabled << ", dht_enabled is " << dht_enabled
             << ", interp_enabled is " << interp_enabled << std::endl;
-
   */
 
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
@@ -258,7 +247,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   poet::WorkPackage s_curr_wp_control = s_curr_wp;
 
-  if (control_enabled) {
+  if (ctrl_enabled) {
     ctrl_cp_start = MPI_Wtime();
     for (std::size_t wp_i = 0; wp_i < s_curr_wp_control.size; wp_i++) {
       s_curr_wp_control.output[wp_i] =
@@ -271,12 +260,12 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   phreeqc_time_start = MPI_Wtime();
 
-  WorkerRunWorkPackage(control_enabled ? s_curr_wp_control : s_curr_wp,
+  WorkerRunWorkPackage(ctrl_enabled ? s_curr_wp_control : s_curr_wp,
                        current_sim_time, dt);
 
   phreeqc_time_end = MPI_Wtime();
 
-  if (control_enabled) {
+  if (ctrl_enabled) {
     ctrl_start = MPI_Wtime();
     copyCtrlPkgs(s_curr_wp_control, s_curr_wp, mpi_buffer, count);
     ctrl_end = MPI_Wtime();
@@ -288,14 +277,14 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   /* send results to master */
   MPI_Request send_req;
 
-  int mpi_tag = control_enabled ? LOOP_CTRL : LOOP_WORK;
+  int mpi_tag = ctrl_enabled ? LOOP_CTRL : LOOP_WORK;
   MPI_Isend(mpi_buffer.data(), count, MPI_DOUBLE, 0, mpi_tag, MPI_COMM_WORLD,
             &send_req);
 
   if (dht_enabled || interp_enabled || stab_enabled) {
     /* write results to DHT */
     dht_fill_start = MPI_Wtime();
-    dht->fillDHT(control_enabled ? s_curr_wp_control : s_curr_wp);
+    dht->fillDHT(ctrl_enabled ? s_curr_wp_control : s_curr_wp);
     dht_fill_end = MPI_Wtime();
 
     if (interp_enabled || stab_enabled) {

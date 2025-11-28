@@ -14,21 +14,22 @@ namespace poet {
 class ChemistryModule;
 
 struct ControlConfig {
-  uint32_t control_interval = 0;
-  uint32_t checkpoint_interval = 0;
+  uint32_t ctrl_interval = 0;
+  uint32_t chkpt_interval = 0;
+  uint32_t rb_limit = 0;
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };
 
-struct SpeciesErrorMetrics {
+struct SpeciesMetrics {
   std::vector<double> mape;
   std::vector<double> rrmse;
   uint32_t iteration = 0;
-  uint32_t rollback_count = 0;
+  uint32_t rb_count = 0;
 
-  SpeciesErrorMetrics(uint32_t n_species, uint32_t iter, uint32_t rb_count)
+  SpeciesMetrics(uint32_t n_species, uint32_t iter, uint32_t count)
       : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter),
-        rollback_count(rb_count) {}
+        rb_count(count) {}
 };
 
 class ControlModule {
@@ -40,12 +41,12 @@ public:
 
   void writeCheckpoint(uint32_t &iter, const std::string &out_dir);
 
-  void writeErrorMetrics(const std::string &out_dir,
+  void writeMetrics(const std::string &out_dir,
                          const std::vector<std::string> &species);
 
-  std::optional<uint32_t> getRollbackTarget();
+  std::optional<uint32_t> findRbTarget();
 
-  void computeErrorMetrics(const std::vector<double> &reference_values,
+  void computeMetrics(const std::vector<double> &reference_values,
                            const std::vector<double> &surrogate_values,
                            const uint32_t size_per_prop,
                            const std::vector<std::string> &species);
@@ -55,11 +56,11 @@ public:
                          const std::vector<std::string> &species);
 
   std::optional<uint32_t>
-  getRollbackTarget(const std::vector<std::string> &species);
+  findRbTarget(const std::vector<std::string> &species);
 
-  bool shouldBcastFlags() const;
-  bool getControlIntervalEnabled() const {
-    return this->control_interval_enabled;
+  bool needsFlagBcast() const;
+  bool isCtrlIntervalActive() const {
+    return this->ctrl_active;
   }
 
   bool getFlushRequest() const { return flush_request; }
@@ -67,34 +68,32 @@ public:
 
   /* Profiling getters */
 
-  double getUpdateCtrlLogicTime() const { return prep_t; }
-  double getWriteCheckpointTime() const { return w_check_t; }
-  double getReadCheckpointTime() const { return r_check_t; }
-  double getWriteMetricsTime() const { return stats_t; }
+  double getCtrlLogicTime() const { return prep_t; }
+  double getChkptWriteTime() const { return w_check_t; }
+  double getChkptReadTime() const { return r_check_t; }
+  double getMetricsWriteTime() const { return stats_t; }
 
 private:
-  void updateStabilizationPhase(bool dht_enabled, bool interp_enabled);
+  void updateSurrState(bool dht_enabled, bool interp_enabled);
 
   void readCheckpoint(uint32_t &current_iter,
                       uint32_t rollback_iter, const std::string &out_dir);
 
-  uint32_t getRollbackIter();
+  uint32_t calcRbIter();
 
   ControlConfig config;
   ChemistryModule *chem = nullptr;
 
-  std::uint32_t global_iteration = 0;
-  std::uint32_t rollback_count = 0;
-  std::uint32_t disable_surr_counter = 0;
-  std::uint32_t last_checkpoint_written = 0;
+  std::uint32_t global_iter = 0;
+  std::uint32_t rb_count = 0;
+  std::uint32_t stab_countdown = 0;
+  std::uint32_t last_chkpt_written = 0;
 
-  bool rollback_enabled = false;
-  bool control_interval_enabled = false;
+  bool rb_enabled = false;
+  bool ctrl_active = false;
   bool flush_request = false;
 
-  bool bcast_flags = false;
-
-  std::vector<SpeciesErrorMetrics> metrics_history;
+  std::vector<SpeciesMetrics> metrics_history;
 
   double prep_t = 0.;
   double r_check_t = 0.;

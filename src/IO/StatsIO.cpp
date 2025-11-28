@@ -7,7 +7,7 @@
 
 namespace poet
 {
-    void writeStatsToCSV(const std::vector<SpeciesErrorMetrics> &all_stats,
+    void writeStatsToCSV(const std::vector<SpeciesMetrics> &all_stats,
                          const std::vector<std::string> &species_names,
                          const std::string &out_dir,
                          const std::string &filename)
@@ -37,7 +37,7 @@ namespace poet
             {
                 out << std::left
                     << std::setw(15) << all_stats[i].iteration
-                    << std::setw(15) << all_stats[i].rollback_count
+                    << std::setw(15) << all_stats[i].rb_count
                     << std::setw(15) << species_names[j]
                     << std::setw(15) << all_stats[i].mape[j]
                     << std::setw(15) << all_stats[i].rrmse[j]

@@ -232,6 +232,17 @@ inline void printProgressbar(int count_pkgs, int n_wp, int barWidth = 70) {
   /* end visual progress */
 }
 
+inline uint32_t poet::ChemistryModule::buildCtrlFlags(bool dht, bool interp, bool stab) {
+  uint32_t flags = 0;
+  if (dht)
+    flags |= DHT_ENABLE;
+  if (interp)
+    flags |= IP_ENABLE;
+  if (stab)
+    flags |= STAB_ENABLE;
+  return flags;
+}
+
 inline void poet::ChemistryModule::MasterSendPkgs(
     worker_list_t &w_list, workpointer_t &work_pointer,
     workpointer_t &sur_pointer, int &pkg_to_send, int &count_pkgs,
@@ -257,7 +268,7 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       /* note current processed work package in workerlist */
       w_list[p].send_addr = work_pointer.base();
       w_list[p].surrogate_addr = sur_pointer.base();
-      // this->control_enabled ? sur_pointer.base() : w_list[p].surrogate_addr =
+      // this->ctrl_enabled ? sur_pointer.base() : w_list[p].surrogate_addr =
       // nullptr;
 
       /* push work pointer to next work package */
@@ -282,7 +293,7 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       // control flags (bitmask)
 
       /* int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 :
-       0) | (this->warmup_enabled ? 4 : 0) | (this->control_enabled ? 8 : 0);
+       0) | (this->warmup_enabled ? 4 : 0) | (this->ctrl_enabled ? 8 : 0);
        send_buffer[end_of_wp + 5] = static_cast<double>(flags);
        */
 
@@ -449,19 +460,17 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   /* broadcast control state once every iteration */
   ftype = CHEM_CTRL_ENABLE;
   PropagateFunctionType(ftype);
-  int ctrl =
-      (this->control_enabled = this->control->getControlIntervalEnabled()) ? 1
-                                                                           : 0;
-  ChemBCast(&ctrl, 1, MPI_INT);
+  uint32_t ctrl = (ctrl_enabled = control->isCtrlIntervalActive()) ? 1 : 0;
+  ChemBCast(&ctrl, 1, MPI_UINT32_T);
 
-  if (control->shouldBcastFlags()) {
+  if (control->needsFlagBcast()) {
     int ftype = CHEM_CTRL_FLAGS;
     PropagateFunctionType(ftype);
-    uint32_t ctrl_flags = buildControlPacket(
-        this->dht_enabled, this->interp_enabled, this->stab_enabled);
-    ChemBCast(&ctrl_flags, 1, MPI_INT);
+    uint32_t ctrl_flags =
+        buildCtrlFlags(dht_enabled, interp_enabled, stab_enabled);
+    ChemBCast(&ctrl_flags, 1, MPI_UINT32_T);
 
-    this->mpi_surr_buffer.assign(this->n_cells * this->prop_count, 0.0);
+    mpi_surr_buffer.assign(n_cells * prop_count, 0.0);
   }
 
   ftype = CHEM_WORK_LOOP;
@@ -481,8 +490,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
                    wp_sizes_vector.size());
 
   // Only resize surrogate buffer if control is enabled
-  if (this->control_enabled) {
-    this->mpi_surr_buffer.resize(mpi_buffer.size());
+  if (ctrl_enabled) {
+    mpi_surr_buffer.resize(mpi_buffer.size());
   }
 
   /* setup local variables */
@@ -490,9 +499,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   pkg_to_recv = wp_sizes_vector.size();
 
   workpointer_t work_pointer = mpi_buffer.begin();
-  workpointer_t sur_pointer = this->mpi_surr_buffer.begin();
-  //(this->control_enabled ? this->mpi_surr_buffer.begin()
-  //                     : mpi_buffer.end());
+  workpointer_t sur_pointer = mpi_surr_buffer.begin();
+
   worker_list_t worker_list(this->comm_size - 1);
 
   free_workers = this->comm_size - 1;
@@ -540,14 +548,12 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   chem_field = out_vec;
 
   /* do master stuff */
-  if (this->control_enabled) {
-    std::cout << "[Master] Control logic enabled for this iteration."
-              << std::endl;
+  if (ctrl_enabled) {
     std::vector<double> sur_unshuffled{mpi_surr_buffer};
 
     shuf_a = MPI_Wtime();
-    unshuffleField(this->mpi_surr_buffer, this->n_cells, this->prop_count,
-                   wp_sizes_vector.size(), sur_unshuffled);
+    unshuffleField(mpi_surr_buffer, n_cells, prop_count, wp_sizes_vector.size(),
+                   sur_unshuffled);
     shuf_b = MPI_Wtime();
     this->shuf_t += shuf_b - shuf_a;
 
@@ -558,8 +564,7 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     }
 
     metrics_a = MPI_Wtime();
-    control->computeErrorMetrics(out_vec, sur_unshuffled, this->n_cells,
-                                 prop_names);
+    control->computeMetrics(out_vec, sur_unshuffled, n_cells, prop_names);
     metrics_b = MPI_Wtime();
 
     this->metrics_t += metrics_b - metrics_a;
@@ -575,10 +580,10 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   /* end time measurement of whole chemistry simulation */
 
   std::optional<uint32_t> target = std::nullopt;
-  if (this->control_enabled) {
-    target = control->getRollbackTarget(prop_names);
+  if (ctrl_enabled) {
+    target = control->findRbTarget(prop_names);
   }
-  int flush = (this->control_enabled && target.has_value()) ? 1 : 0;
+  int flush = (ctrl_enabled && target.has_value()) ? 1 : 0;
 
   /* advise workers to end chemistry iteration */
   for (int i = 1; i < this->comm_size; i++) {

@@ -249,10 +249,12 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
 
     params.timesteps =
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("timesteps"));
-    params.control_interval =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("control_interval"));
-    params.checkpoint_interval =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("checkpoint_interval"));
+    params.ctrl_interval =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("ctrl_interval"));
+    params.chkpt_interval =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("chkpt_interval"));
+    params.rb_limit =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_limit"));
     params.mape_threshold = Rcpp::as<std::vector<double>>(
         global_rt_setup->operator[]("mape_threshold"));
     params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
@@ -411,9 +413,10 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
     MSG("End of *coupling* iteration " + std::to_string(iter) + "/" +
         std::to_string(maxiter));
 
-    if (control.getControlIntervalEnabled()) {
-      control.processCheckpoint(iter, params.out_dir, chem.getField().GetProps());
-      control.writeErrorMetrics(params.out_dir, chem.getField().GetProps());
+    if (control.isCtrlIntervalActive()) {
+      control.processCheckpoint(iter, params.out_dir,
+                                chem.getField().GetProps());
+      control.writeMetrics(params.out_dir, chem.getField().GetProps());
     }
     // MSG();
   } // END SIMULATION LOOP
@@ -434,10 +437,10 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   Rcpp::List ctrl_profiling;
   ctrl_profiling["compute_metrics_master"] = chem.GetMasterCtrlMetricsTime();
   ctrl_profiling["unshuffle_field_master"] = chem.GetMasterUnshuffleTime();
-  ctrl_profiling["w_checkpoint_master"] = control.getWriteCheckpointTime();
-  ctrl_profiling["r_checkpoint_master"] = control.getReadCheckpointTime();
-  ctrl_profiling["write_stats"] = control.getWriteMetricsTime();
-  ctrl_profiling["ctrl_logic_master"] = control.getUpdateCtrlLogicTime();
+  ctrl_profiling["w_checkpoint_master"] = control.getChkptWriteTime();
+  ctrl_profiling["r_checkpoint_master"] = control.getChkptReadTime();
+  ctrl_profiling["write_stats"] = control.getMetricsWriteTime();
+  ctrl_profiling["ctrl_logic_master"] = control.getCtrlLogicTime();
   ctrl_profiling["recv_data_master"] = chem.GetMasterRecvCtrlDataTime();
   ctrl_profiling["worker"] = Rcpp::wrap(chem.GetWorkerControlTimings());
 
@@ -629,6 +632,14 @@ int main(int argc, char *argv[]) {
 
     chemistry.masterEnableSurrogates(surr_setup);
 
+    ControlConfig config(run_params.ctrl_interval, run_params.chkpt_interval,
+                         run_params.rb_limit, run_params.zero_abs,
+                         run_params.mape_threshold);
+
+    ControlModule control(config, &chemistry);
+
+    chemistry.SetControlModule(&control);
+
     if (MY_RANK > 0) {
       chemistry.WorkerLoop();
     } else {
@@ -671,14 +682,6 @@ int main(int argc, char *argv[]) {
                                 init_list.getInitialGrid());
 
       chemistry.masterSetField(init_list.getInitialGrid());
-
-      ControlConfig config(run_params.control_interval,
-                           run_params.checkpoint_interval, run_params.zero_abs,
-                           run_params.mape_threshold);
-
-      ControlModule control(config, &chemistry);
-
-      chemistry.SetControlModule(&control);
 
       Rcpp::List profiling =
           RunMasterLoop(R, run_params, diffusion, chemistry, control);

@@ -102,8 +102,6 @@ public:
 
     this->base_totals = setup.base_totals;
 
-    this->ctr_file_out_dir = setup.dht_out_dir;
-
     if (this->dht_enabled || this->interp_enabled) {
       this->initializeDHT(setup.dht_size_mb, this->params.dht_species,
                           setup.has_het_ids);
@@ -269,6 +267,8 @@ public:
 
   void SetStabEnabled(bool enabled) { stab_enabled = enabled; }
 
+ inline uint32_t buildCtrlFlags(bool dht, bool interp, bool stab);
+
 protected:
   void initializeDHT(uint32_t size_mb,
                      const NamedVector<std::uint32_t> &key_species,
@@ -384,10 +384,10 @@ protected:
   void BCastStringVec(std::vector<std::string> &io);
 
   void copyPkgs(const WorkPackage &wp, std::vector<double> &mpi_buffer,
-                  std::size_t offset = 0);
+                std::size_t offset = 0);
 
   void copyCtrlPkgs(const WorkPackage &pqc_wp, const WorkPackage &surr_wp,
-                         std::vector<double> &mpi_bufffer, int &count);
+                    std::vector<double> &mpi_bufffer, int &count);
 
   int comm_size, comm_rank;
   MPI_Comm group_comm;
@@ -415,20 +415,6 @@ protected:
 
   inline void PropagateFunctionType(int &type) const {
     ChemBCast(&type, 1, MPI_INT);
-  }
-
-  std::string ctr_file_out_dir;
-
-  inline int buildControlPacket(bool dht, bool interp, bool stab) {
-    int flags = 0;
-
-    if (dht)
-      flags |= DHT_ENABLE;
-    if (interp)
-      flags |= IP_ENABLE;
-    if (stab)
-      flags |= STAB_ENABLE;
-    return flags;
   }
 
   inline bool hasFlag(int flags, int type) { return (flags & type) != 0; }
@@ -464,7 +450,7 @@ protected:
 
   std::vector<double> mpi_surr_buffer;
 
-  bool control_enabled{false};
+  bool ctrl_enabled{false};
   bool stab_enabled{false};
 };
 } // namespace poet

@@ -58,7 +58,7 @@ all_data <- lapply(args, function(stats_file) {
 })
 
 combined_data <- bind_rows(all_data) %>%
-  filter(Iteration <= 3000) %>%
+  filter(Iteration >= 3000 & Iteration <= 8000) %>%
   filter(is.finite(MedianMAPE) & MedianMAPE > 0) %>%
   filter(is.finite(MaxMAPE) & MaxMAPE > 0)
 
