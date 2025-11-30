@@ -48,20 +48,19 @@ void poet::ChemistryModule::WorkerLoop() {
     case CHEM_FIELD_INIT: {
       ChemBCast(&this->prop_count, 1, MPI_UINT32_T);
       if (this->ai_surrogate_enabled) {
-        this->ai_surrogate_validity_vector.resize(
-            this->n_cells); // resize statt reserve?
+        this->ai_surrogate_validity_vector.resize(this->n_cells); // resize statt reserve?
       }
       break;
     }
     case CHEM_AI_BCAST_VALIDITY: {
       // Receive the index vector of valid ai surrogate predictions
-      MPI_Bcast(&this->ai_surrogate_validity_vector.front(), this->n_cells,
-                MPI_INT, 0, this->group_comm);
+      MPI_Bcast(&this->ai_surrogate_validity_vector.front(), this->n_cells, MPI_INT, 0,
+                this->group_comm);
       break;
     }
     case CHEM_CTRL_FLAGS: {
-      int flags = 0;
-      ChemBCast(&flags, 1, MPI_INT);
+      uint32_t flags = 0;
+      ChemBCast(&flags, 1, MPI_UINT32_T);
       this->dht_enabled = hasFlag(flags, DHT_ENABLE);
       this->interp_enabled = hasFlag(flags, IP_ENABLE);
       this->stab_enabled = hasFlag(flags, STAB_ENABLE);
@@ -94,8 +93,7 @@ void poet::ChemistryModule::WorkerLoop() {
   }
 }
 
-void poet::ChemistryModule::WorkerProcessPkgs(struct worker_s &timings,
-                                              uint32_t &iteration) {
+void poet::ChemistryModule::WorkerProcessPkgs(struct worker_s &timings, uint32_t &iteration) {
   MPI_Status probe_status;
   bool loop = true;
 
@@ -125,8 +123,7 @@ void poet::ChemistryModule::WorkerProcessPkgs(struct worker_s &timings,
   }
 }
 
-void poet::ChemistryModule::copyPkgs(const WorkPackage &wp,
-                                     std::vector<double> &mpi_buffer) {
+void poet::ChemistryModule::copyPkgs(const WorkPackage &wp, std::vector<double> &mpi_buffer) {
 
   for (std::size_t wp_i = 0; wp_i < wp.size; wp_i++) {
     std::copy(wp.output[wp_i].begin(), wp.output[wp_i].end(),
@@ -134,9 +131,9 @@ void poet::ChemistryModule::copyPkgs(const WorkPackage &wp,
   }
 }
 
-void poet::ChemistryModule::processCtrlPkgs(
-    std::vector<std::vector<double>> &input, double current_sim_time, double dt,
-    struct worker_s &timings) {
+void poet::ChemistryModule::processCtrlPkgs(std::vector<std::vector<double>> &input,
+                                            double current_sim_time, double dt,
+                                            struct worker_s &timings) {
 
   double phreeqc_start, phreeqc_end;
 
@@ -156,13 +153,12 @@ void poet::ChemistryModule::processCtrlPkgs(
   copyPkgs(control_wp, mpi_buffer);
 
   MPI_Request send_req;
-  MPI_Isend(mpi_buffer.data(), mpi_buffer.size(), MPI_DOUBLE, 0, LOOP_CTRL,
-            MPI_COMM_WORLD, &send_req);
+  MPI_Isend(mpi_buffer.data(), mpi_buffer.size(), MPI_DOUBLE, 0, LOOP_CTRL, MPI_COMM_WORLD,
+            &send_req);
   MPI_Wait(&send_req, MPI_STATUS_IGNORE);
 }
 
-void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
-                                         int double_count,
+void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_count,
                                          struct worker_s &timings) {
   static int counter = 1;
 
@@ -179,12 +175,14 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   int flags;
   std::vector<double> mpi_buffer(count);
 
-  static int control_cells_processed = 0;
-  static std::vector<std::vector<double>> control_batch;
+  static int ctrl_cells_processed = 0;
+  static std::vector<std::vector<double>> ctrl_batch;
+
+  const int CL_INDEX = 7;
+  const double CL_THRESHOLD = 1e-10;
 
   /* receive */
-  MPI_Recv(mpi_buffer.data(), count, MPI_DOUBLE, 0, LOOP_WORK, this->group_comm,
-           MPI_STATUS_IGNORE);
+  MPI_Recv(mpi_buffer.data(), count, MPI_DOUBLE, 0, LOOP_WORK, this->group_comm, MPI_STATUS_IGNORE);
 
   /* decrement count of work_package by BUFFER_OFFSET */
   count -= BUFFER_OFFSET;
@@ -206,26 +204,20 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   // current work package start location in field
   wp_start_index = mpi_buffer[count + 4];
 
-  // read packed control flags
-  /*
-  flags = static_cast<int>(mpi_buffer[count + 5]);
-  this->interp_enabled = (flags & 1) != 0;
-  this->dht_enabled = (flags & 2) != 0;
-  this->warmup_enabled = (flags & 4) != 0;
-  this->control_enabled = (flags & 8) != 0;
-  */
-
-  /*std::cout << "warmup_enabled is " << warmup_enabled << ", control_enabled is
-     "
-            << control_enabled << ", dht_enabled is "
-            << dht_enabled <<  ", interp_enabled is " << interp_enabled
-            << std::endl;*/
-
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
-    s_curr_wp.input[wp_i] =
-        std::vector<double>(mpi_buffer.begin() + this->prop_count * wp_i,
-                            mpi_buffer.begin() + this->prop_count * (wp_i + 1));
+    s_curr_wp.input[wp_i] = std::vector<double>(mpi_buffer.begin() + this->prop_count * wp_i,
+                                                mpi_buffer.begin() + this->prop_count * (wp_i + 1));
   }
+
+  /* skip simulation of cells cells where Cl concentration is below threshold */
+  /*
+  for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
+    if (s_curr_wp.input[wp_i][CL_INDEX] < CL_THRESHOLD) {
+      s_curr_wp.mapping[wp_i] = CHEM_SKIP;
+      s_curr_wp.output[wp_i] = s_curr_wp.input[wp_i];
+    }
+  }
+  */
 
   // std::cout << this->comm_rank << ":" << counter++ << std::endl;
   if (dht_enabled || interp_enabled || stab_enabled) {
@@ -253,28 +245,26 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
     }
   }
 
-  /* process cells to be monitored in a seperate workpackage */
-
+  //  if (!this->stab_enabled) { /* process cells to be monitored in a seperate workpackage */
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     uint32_t cell_id = s_curr_wp.input[wp_i][0];
 
-    bool is_ctrl_cell =
-        this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end();
-    bool used_sur = s_curr_wp.mapping[wp_i] != CHEM_PQC;
+    bool is_ctrl_cell = this->ctrl_cell_ids.find(cell_id) != this->ctrl_cell_ids.end();
+    bool used_sur = (s_curr_wp.mapping[wp_i] != CHEM_PQC) && (s_curr_wp.mapping[wp_i] != CHEM_SKIP);
 
     if (is_ctrl_cell && used_sur) {
+      ctrl_batch.push_back(s_curr_wp.input[wp_i]);
+      ctrl_cells_processed++;
 
-      control_batch.push_back(s_curr_wp.input[wp_i]);
-      control_cells_processed++;
-
-      if (control_batch.size() == s_curr_wp.size ||
-          control_cells_processed == this->ctrl_cell_ids.size()) {
-        processCtrlPkgs(control_batch, current_sim_time, dt, timings);
-        control_batch.clear();
-        control_cells_processed = 0;
+      if (ctrl_batch.size() == s_curr_wp.size ||
+          ctrl_cells_processed == this->ctrl_cell_ids.size()) {
+        processCtrlPkgs(ctrl_batch, current_sim_time, dt, timings);
+        ctrl_batch.clear();
+        ctrl_cells_processed = 0;
       }
     }
   }
+  // }
 
   phreeqc_time_start = MPI_Wtime();
 
@@ -286,8 +276,7 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
 
   /* send results to master */
   MPI_Request send_req;
-  MPI_Isend(mpi_buffer.data(), count, MPI_DOUBLE, 0, LOOP_WORK, MPI_COMM_WORLD,
-            &send_req);
+  MPI_Isend(mpi_buffer.data(), count, MPI_DOUBLE, 0, LOOP_WORK, MPI_COMM_WORLD, &send_req);
 
   if (dht_enabled || interp_enabled || stab_enabled) {
     /* write results to DHT */
@@ -305,17 +294,16 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status,
   MPI_Wait(&send_req, MPI_STATUS_IGNORE);
 }
 
-void poet::ChemistryModule::WorkerPostIter(MPI_Status &probe_status,
-                                           uint32_t iteration) {
+void poet::ChemistryModule::WorkerPostIter(MPI_Status &probe_status, uint32_t iteration) {
   int size, flush_request = 0;
   MPI_Get_count(&probe_status, MPI_INT, &size);
 
   if (size == 1) {
-    MPI_Recv(&flush_request, size, MPI_INT, probe_status.MPI_SOURCE, LOOP_END,
-             this->group_comm, MPI_STATUS_IGNORE);
+    MPI_Recv(&flush_request, size, MPI_INT, probe_status.MPI_SOURCE, LOOP_END, this->group_comm,
+             MPI_STATUS_IGNORE);
   } else {
-    MPI_Recv(NULL, 0, MPI_INT, probe_status.MPI_SOURCE, LOOP_END,
-             this->group_comm, MPI_STATUS_IGNORE);
+    MPI_Recv(NULL, 0, MPI_INT, probe_status.MPI_SOURCE, LOOP_END, this->group_comm,
+             MPI_STATUS_IGNORE);
   }
 
   if (this->dht_enabled) {
@@ -334,13 +322,12 @@ void poet::ChemistryModule::WorkerPostIter(MPI_Status &probe_status,
     interp->resetCounter();
     interp->writePHTStats();
     if (this->dht_snaps_type == DHT_SNAPS_ITEREND) {
-      out << this->dht_file_out_dir << "/iter_" << std::setfill('0')
-          << std::setw(this->file_pad) << iteration << ".pht";
+      out << this->dht_file_out_dir << "/iter_" << std::setfill('0') << std::setw(this->file_pad)
+          << iteration << ".pht";
       interp->dumpPHTState(out.str());
     }
 
-    const auto max_mean_idx =
-        DHT_get_used_idx_factor(this->interp->getDHTObject(), 1);
+    const auto max_mean_idx = DHT_get_used_idx_factor(this->interp->getDHTObject(), 1);
 
     if (max_mean_idx >= 2 || flush_request) {
       DHT_flush(this->interp->getDHTObject());
@@ -360,33 +347,29 @@ void poet::ChemistryModule::WorkerPostSim(uint32_t iteration) {
   }
   if (this->interp_enabled && this->dht_snaps_type >= DHT_SNAPS_ITEREND) {
     std::stringstream out;
-    out << this->dht_file_out_dir << "/iter_" << std::setfill('0')
-        << std::setw(this->file_pad) << iteration << ".pht";
+    out << this->dht_file_out_dir << "/iter_" << std::setfill('0') << std::setw(this->file_pad)
+        << iteration << ".pht";
     interp->dumpPHTState(out.str());
   }
 }
 
 void poet::ChemistryModule::WorkerWriteDHTDump(uint32_t iteration) {
   std::stringstream out;
-  out << this->dht_file_out_dir << "/iter_" << std::setfill('0')
-      << std::setw(this->file_pad) << iteration << ".dht";
+  out << this->dht_file_out_dir << "/iter_" << std::setfill('0') << std::setw(this->file_pad)
+      << iteration << ".dht";
   int res = dht->tableToFile(out.str().c_str());
   if (res != DHT_SUCCESS && this->comm_rank == 2)
-    std::cerr
-        << "CPP: Worker: Error in writing current state of DHT to file.\n";
+    std::cerr << "CPP: Worker: Error in writing current state of DHT to file.\n";
   else if (this->comm_rank == 2)
-    std::cout << "CPP: Worker: Successfully written DHT to file " << out.str()
-              << "\n";
+    std::cout << "CPP: Worker: Successfully written DHT to file " << out.str() << "\n";
 }
 
-void poet::ChemistryModule::WorkerReadDHTDump(
-    const std::string &dht_input_file) {
+void poet::ChemistryModule::WorkerReadDHTDump(const std::string &dht_input_file) {
   int res = dht->fileToTable((char *)dht_input_file.c_str());
   if (res != DHT_SUCCESS) {
     if (res == DHT_WRONG_FILE) {
       if (this->comm_rank == 1)
-        std::cerr
-            << "CPP: Worker: Wrong file layout! Continue with empty DHT ...\n";
+        std::cerr << "CPP: Worker: Wrong file layout! Continue with empty DHT ...\n";
     } else {
       if (this->comm_rank == 1)
         std::cerr << "CPP: Worker: Error in loading current state of DHT from "
@@ -394,13 +377,12 @@ void poet::ChemistryModule::WorkerReadDHTDump(
     }
   } else {
     if (this->comm_rank == 2)
-      std::cout << "CPP: Worker: Successfully loaded state of DHT from file "
-                << dht_input_file << "\n";
+      std::cout << "CPP: Worker: Successfully loaded state of DHT from file " << dht_input_file
+                << "\n";
   }
 }
 
-void poet::ChemistryModule::WorkerRunWorkPackage(WorkPackage &work_package,
-                                                 double dSimTime,
+void poet::ChemistryModule::WorkerRunWorkPackage(WorkPackage &work_package, double dSimTime,
                                                  double dTimestep) {
 
   std::vector<std::vector<double>> inout_chem = work_package.input;
@@ -412,11 +394,12 @@ void poet::ChemistryModule::WorkerRunWorkPackage(WorkPackage &work_package,
     }
 
     // HACK: remove the first element (cell_id) before sending to phreeqc
-    inout_chem[wp_id].erase(inout_chem[wp_id].begin(),
-                            inout_chem[wp_id].begin() + 1);
+    inout_chem[wp_id].erase(inout_chem[wp_id].begin(), inout_chem[wp_id].begin() + 1);
   }
 
   this->pqc_runner->run(inout_chem, dTimestep, to_ignore);
+
+  //std::cout << "Ignored " << to_ignore.size() << " cells out of " << wp_size << "." << std::endl;
 
   for (std::size_t wp_id = 0; wp_id < work_package.size; wp_id++) {
     if (work_package.mapping[wp_id] == CHEM_PQC) {
@@ -429,32 +412,26 @@ void poet::ChemistryModule::WorkerRunWorkPackage(WorkPackage &work_package,
   }
 }
 
-void poet::ChemistryModule::WorkerPerfToMaster(int type,
-                                               const struct worker_s &timings) {
+void poet::ChemistryModule::WorkerPerfToMaster(int type, const struct worker_s &timings) {
   switch (type) {
   case WORKER_PHREEQC: {
-    MPI_Gather(&timings.phreeqc_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0,
-               this->group_comm);
+    MPI_Gather(&timings.phreeqc_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, this->group_comm);
     break;
   }
   case WORKER_CTRL_ITER: {
-    MPI_Gather(&timings.ctrl_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0,
-               this->group_comm);
+    MPI_Gather(&timings.ctrl_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, this->group_comm);
     break;
   }
   case WORKER_DHT_GET: {
-    MPI_Gather(&timings.dht_get, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0,
-               this->group_comm);
+    MPI_Gather(&timings.dht_get, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, this->group_comm);
     break;
   }
   case WORKER_DHT_FILL: {
-    MPI_Gather(&timings.dht_fill, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0,
-               this->group_comm);
+    MPI_Gather(&timings.dht_fill, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, this->group_comm);
     break;
   }
   case WORKER_IDLE: {
-    MPI_Gather(&timings.idle_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0,
-               this->group_comm);
+    MPI_Gather(&timings.idle_t, 1, MPI_DOUBLE, NULL, 1, MPI_DOUBLE, 0, this->group_comm);
     break;
   }
   case WORKER_IP_WRITE: {
@@ -490,15 +467,14 @@ void poet::ChemistryModule::WorkerMetricsToMaster(int type) {
 
   MPI_Comm &group_comm = this->group_comm;
 
-  auto reduce_and_send = [&worker_rank, &worker_comm, &group_comm](
-                             std::vector<std::uint32_t> &send_buffer, int tag) {
+  auto reduce_and_send = [&worker_rank, &worker_comm,
+                          &group_comm](std::vector<std::uint32_t> &send_buffer, int tag) {
     std::vector<uint32_t> to_master(send_buffer.size());
-    MPI_Reduce(send_buffer.data(), to_master.data(), send_buffer.size(),
-               MPI_UINT32_T, MPI_SUM, 0, worker_comm);
+    MPI_Reduce(send_buffer.data(), to_master.data(), send_buffer.size(), MPI_UINT32_T, MPI_SUM, 0,
+               worker_comm);
 
     if (worker_rank == 0) {
-      MPI_Send(to_master.data(), to_master.size(), MPI_UINT32_T, 0, tag,
-               group_comm);
+      MPI_Send(to_master.data(), to_master.size(), MPI_UINT32_T, 0, tag, group_comm);
     }
   };
 

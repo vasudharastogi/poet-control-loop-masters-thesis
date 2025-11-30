@@ -406,8 +406,9 @@ protected:
       flags |= STAB_ENABLE;
     return flags;
   }
-
   inline bool hasFlag(int flags, int type) { return (flags & type) != 0; }
+
+  
 
   int comm_size, comm_rank;
   MPI_Comm group_comm;
@@ -436,6 +437,8 @@ protected:
   inline void PropagateFunctionType(int &type) const {
     ChemBCast(&type, 1, MPI_INT);
   }
+
+
 
   double simtime = 0.;
   double idle_t = 0.;

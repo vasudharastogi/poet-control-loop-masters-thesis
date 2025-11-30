@@ -10,33 +10,33 @@ poet::ControlModule::ControlModule(const ControlConfig &config_) : config(config
 void poet::ControlModule::beginIteration(ChemistryModule &chem, uint32_t &iter,
                                          const bool &dht_enabled, const bool &interp_enabled) {
 
-  global_iteration = iter;
+  global_iter = iter;
   double prep_a, prep_b;
 
   prep_a = MPI_Wtime();
 
-  updateStabilizationPhase(chem, dht_enabled, interp_enabled);
+  updateSurrState(chem, dht_enabled, interp_enabled);
   prep_b = MPI_Wtime();
   this->prep_t += prep_b - prep_a;
 }
 
 /* Disables dht and/or interp during stabilzation phase */
-void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem, bool dht_enabled,
-                                                   bool interp_enabled) {
-  bool in_warmup = (global_iteration <= config.stab_interval);
-  bool rb_limit_reached = (rollback_count >= 3);
+void poet::ControlModule::updateSurrState(ChemistryModule &chem, bool dht_enabled,
+                                          bool interp_enabled) {
+  bool in_warmup = (global_iter <= config.stab_interval);
+  bool rb_limit_reached = (rb_count >= config.rb_limit);
 
-  if (rollback_enabled && disable_surr_counter > 0) {
-    --disable_surr_counter;
-    std::cout << "Rollback counter: " << std::to_string(disable_surr_counter) << std::endl;
-    if (disable_surr_counter == 0) {
-      rollback_enabled = false;
+  if (rb_enabled && stab_countdown > 0) {
+    --stab_countdown;
+    std::cout << "Rollback counter: " << std::to_string(stab_countdown) << std::endl;
+    if (stab_countdown == 0) {
+      rb_enabled = false;
     }
     flush_request = false;
   }
 
   /* disable surrogates during warmup, active rollback or after limit */
-  if (in_warmup || rollback_enabled || rb_limit_reached) {
+  if (in_warmup || rb_enabled || rb_limit_reached) {
     chem.SetStabEnabled(!rb_limit_reached);
     chem.SetDhtEnabled(false);
     chem.SetInterpEnabled(false);
@@ -58,13 +58,12 @@ void poet::ControlModule::updateStabilizationPhase(ChemistryModule &chem, bool d
 
 void poet::ControlModule::writeCheckpoint(DiffusionModule &diffusion, uint32_t &iter,
                                           const std::string &out_dir) {
-  if (global_iteration % config.checkpoint_interval == 0) {
+  if (global_iter % config.chkpt_interval == 0) {
     double w_check_a = MPI_Wtime();
     write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
                      {.field = diffusion.getField(), .iteration = iter});
     double w_check_b = MPI_Wtime();
     this->w_check_t += w_check_b - w_check_a;
-    last_checkpoint_written = iter;
   }
 }
 
@@ -80,37 +79,39 @@ void poet::ControlModule::readCheckpoint(DiffusionModule &diffusion, uint32_t &c
   r_check_t += r_check_b - r_check_a;
 }
 
-void poet::ControlModule::writeErrorMetrics(uint32_t &iter, const std::string &out_dir,
-                                            const std::vector<std::string> &species) {
+void poet::ControlModule::writeMetrics(uint32_t &iter, const std::string &out_dir,
+                                       const std::vector<std::string> &species) {
 
-  if (rollback_count >= 3) {
+  if (rb_count >= config.rb_limit || global_iter <= config.stab_interval) {
+    return;
+  }
+
+  if (rb_enabled) {
     return;
   }
 
   double stats_a = MPI_Wtime();
-  writeSpeciesStatsToCSV(metrics_history, species, out_dir, "species_overview.csv");
-  write_metrics(cell_metrics_history, species, out_dir, "metrics_overview.hdf5");
+  writeSpeciesStatsToCSV(s_history, species, out_dir, "species_overview.csv");
+  write_metrics(c_history, species, out_dir, "metrics_overview.hdf5");
   double stats_b = MPI_Wtime();
   this->stats_t += stats_b - stats_a;
 }
 
-uint32_t poet::ControlModule::getRollbackIter() {
-
-  uint32_t last_iter =
-      ((global_iteration - 1) / config.checkpoint_interval) * config.checkpoint_interval;
+uint32_t poet::ControlModule::calcRbIter() {
+  uint32_t last_iter = ((global_iter - 1) / config.chkpt_interval) * config.chkpt_interval;
   return last_iter;
 }
 
-std::optional<uint32_t>
-poet::ControlModule::getRollbackTarget(const std::vector<std::string> &species) {
+std::optional<uint32_t> poet::ControlModule::findRbTarget(const std::vector<std::string> &species) {
+
   double r_check_a, r_check_b;
 
   /* Skip threshold checking if already in stabilization phase*/
-  if (metrics_history.empty() || rollback_enabled) {
+  if (s_history.empty() || rb_enabled) {
     return std::nullopt;
   }
 
-  const auto &s_hist = metrics_history.back();
+  const auto &s_hist = s_history.back();
 
   /* skipping cell_id and id */
   for (size_t sp_i = 2; sp_i < species.size(); sp_i++) {
@@ -123,7 +124,7 @@ poet::ControlModule::getRollbackTarget(const std::vector<std::string> &species) 
     }
     if (s_hist.mape[sp_i] > config.mape_threshold[sp_i]) {
 
-      const auto &c_hist = cell_metrics_history.back();
+      const auto &c_hist = c_history.back();
       auto max_it =
           std::max_element(c_hist.mape.begin(), c_hist.mape.end(),
                            [sp_i](const auto &a, const auto &b) { return a[sp_i] < b[sp_i]; });
@@ -132,7 +133,6 @@ poet::ControlModule::getRollbackTarget(const std::vector<std::string> &species) 
       uint32_t cell_id = c_hist.id[max_idx];
       double cell_mape = (*max_it)[sp_i];
 
-      rollback_enabled = true;
       flush_request = true;
 
       std::cout << "Threshold exceeded for " << species[sp_i]
@@ -141,18 +141,17 @@ poet::ControlModule::getRollbackTarget(const std::vector<std::string> &species) 
                 << ". Worst cell: ID=" << std::to_string(cell_id)
                 << " with MAPE=" << std::to_string(cell_mape) << std::endl;
 
-      return getRollbackIter();
+      return calcRbIter();
     }
   }
   return std::nullopt;
 }
 
-void poet::ControlModule::computeErrorMetrics(std::vector<std::vector<double>> &reference_values,
-                                              std::vector<std::vector<double>> &surrogate_values,
-                                              const std::vector<std::string> &species,
-                                              const uint32_t size_per_prop) {
-
-  if (rollback_count >= 3) {
+void poet::ControlModule::computeMetrics(std::vector<std::vector<double>> &reference_values,
+                                         std::vector<std::vector<double>> &surrogate_values,
+                                         const std::vector<std::string> &species,
+                                         const uint32_t size_per_prop, const std::string &out_dir) {
+  if (rb_count >= config.rb_limit) {
     return;
   }
 
@@ -160,8 +159,8 @@ void poet::ControlModule::computeErrorMetrics(std::vector<std::vector<double>> &
   const uint32_t n_species = species.size();
   const double ZERO_ABS = config.zero_abs;
 
-  CellErrorMetrics c_metrics(n_cells, n_species, global_iteration, rollback_count);
-  SpeciesErrorMetrics s_metrics(n_species, global_iteration, rollback_count);
+  CellMetrics c_metrics(n_cells, n_species, global_iter, rb_count);
+  SpeciesMetrics s_metrics(n_species, global_iter, rb_count);
 
   std::vector<double> species_err_sum(n_species, 0.0);
   std::vector<double> species_sqr_sum(n_species, 0.0);
@@ -177,6 +176,15 @@ void poet::ControlModule::computeErrorMetrics(std::vector<std::vector<double>> &
       const double sur_value = surrogate_values[cell_i][sp_i];
 
       if (std::isnan(ref_value) || std::isnan(sur_value)) {
+        // Initialize to 0 for NaN cases to avoid uninitialized values
+        c_metrics.mape[cell_i][sp_i] = 0.0;
+        c_metrics.rrmse[cell_i][sp_i] = 0.0;
+
+        std::cout << "WARNING: NaN detected - Cell=" << reference_values[cell_i][0]
+                  << ", Species=" << species[sp_i]
+                  << ", Ref=" << (std::isnan(ref_value) ? "NaN" : std::to_string(ref_value))
+                  << ", Sur=" << (std::isnan(sur_value) ? "NaN" : std::to_string(sur_value))
+                  << std::endl;
         continue;
       }
       if (std::abs(ref_value) < ZERO_ABS) {
@@ -187,6 +195,10 @@ void poet::ControlModule::computeErrorMetrics(std::vector<std::vector<double>> &
 
           c_metrics.mape[cell_i][sp_i] = 100.0;
           c_metrics.rrmse[cell_i][sp_i] = 1.0;
+        } else {
+          // Both values are near zero, initialize to 0
+          c_metrics.mape[cell_i][sp_i] = 0.0;
+          c_metrics.rrmse[cell_i][sp_i] = 0.0;
         }
       } else {
         double alpha = 1.0 - (sur_value / ref_value);
@@ -232,32 +244,36 @@ void poet::ControlModule::computeErrorMetrics(std::vector<std::vector<double>> &
   c_metrics.mape = std::move(sorted_mape);
   c_metrics.rrmse = std::move(sorted_rrmse);
 
-  metrics_history.push_back(s_metrics);
-  cell_metrics_history.push_back(c_metrics);
+  s_history.push_back(s_metrics);
+  c_history.push_back(c_metrics);
+
+  writeMetrics(global_iter, out_dir, species);
 }
 
 void poet::ControlModule::processCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter,
                                             const std::string &out_dir,
                                             const std::vector<std::string> &species) {
-
-  // Use max_rollbacks from config, default to 3 if not set
-  // uint32_t max_rollbacks =
-  //  (config.max_rollbacks > 0) ? config.max_rollbacks : 3;
-
-  if (rollback_count >= 3) {
+  if (rb_count >= config.rb_limit) {
     return;
   }
-  if (flush_request && rollback_count < 3) {
-    uint32_t target = getRollbackIter();
+  if (flush_request && rb_count < config.rb_limit) {
+    uint32_t target = calcRbIter();
     readCheckpoint(diffusion, current_iter, target, out_dir);
 
-    rollback_enabled = true;
-    rollback_count++;
-    disable_surr_counter = config.stab_interval;
+    rb_enabled = true;
+    rb_count++;
+    stab_countdown = config.stab_interval;
 
     std::cout << "Restored checkpoint " << std::to_string(target) << ", surrogate disabled for "
               << std::to_string(config.stab_interval) << std::endl;
   } else {
-    writeCheckpoint(diffusion, global_iteration, out_dir);
+    writeCheckpoint(diffusion, global_iter, out_dir);
   }
+}
+
+bool poet::ControlModule::needsFlagBcast() const {
+  if (rb_count >= config.rb_limit) {
+    return false;
+  }
+  return true;
 }
