@@ -1,7 +1,7 @@
 iterations <- 10000
 dt <- 200
 chkpt_interval <- 100
-ctrl_interval <- 100
+stab_interval <- 100
 mape_threshold <- rep(0.0035, 13)
 mape_threshold[5] <- 1 #Charge
 zero_abs <- 1e-13
@@ -17,9 +17,10 @@ list(
     store_result = TRUE,
     out_save = out_save,
     chkpt_interval = chkpt_interval,
-    ctrl_interval = ctrl_interval,
+    stab_interval = stab_interval,
     mape_threshold = mape_threshold,
     zero_abs = zero_abs,
     rb_limit = rb_limit,
-    rb_interval_limit = rb_interval_limit
+    rb_interval_limit = rb_interval_limit,
+    ctrl_cell_ids = ctrl_cell_ids
 )
