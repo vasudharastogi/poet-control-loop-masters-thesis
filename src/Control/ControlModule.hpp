@@ -4,7 +4,6 @@
 #include "Base/Macros.hpp"
 #include "Chemistry/ChemistryModule.hpp"
 #include "IO/HDF5Functions.hpp"
-#include "Transport/DiffusionModule.hpp"
 #include "poet.hpp"
 
 #include <cstdint>
@@ -21,6 +20,7 @@ struct ControlConfig {
   uint32_t stab_interval = 0;
   uint32_t chkpt_interval = 0;
   uint32_t rb_limit = 0;
+  uint32_t rb_interval_limit = 0;
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };
@@ -29,12 +29,15 @@ struct CellMetrics {
   std::vector<std::uint32_t> id;
   std::vector<std::vector<double>> mape;
   std::vector<std::vector<double>> rrmse;
+  std::vector<std::vector<double>> conc;
   uint32_t iteration = 0;
   uint32_t rb_count = 0;
 
   CellMetrics(uint32_t n_cells, uint32_t n_species, uint32_t iter, uint32_t rb_count)
-      : mape(n_cells, std::vector<double>(n_species, 0.0)),
-        rrmse(n_cells, std::vector<double>(n_species, 0.0)), iteration(iter), rb_count(rb_count) {}
+      : id(n_cells, 0), mape(n_cells, std::vector<double>(n_species, 0.0)),
+        rrmse(n_cells, std::vector<double>(n_species, 0.0)),
+        conc(n_cells, std::vector<double>(n_species, 0.0)), iteration(iter),
+        rb_count(rb_count) {}
 };
 
 struct SpeciesMetrics {
@@ -50,22 +53,24 @@ struct SpeciesMetrics {
 class ControlModule {
 
 public:
-  explicit ControlModule(const ControlConfig &config);
+  explicit ControlModule(const ControlConfig &config, ChemistryModule &chem);
 
-  void beginIteration(ChemistryModule &chem, uint32_t &iter, const bool &dht_enabled,
-                      const bool &interp_enaled);
+  /* store global iteration, dht and pht settings */
+  void beginIteration(uint32_t &iter, const bool &dht_enabled, const bool &interp_enaled);
 
   void writeMetrics(uint32_t &iter, const std::string &out_dir,
                     const std::vector<std::string> &species);
 
   void computeMetrics(std::vector<std::vector<double>> &reference_values,
                       std::vector<std::vector<double>> &surrogate_values,
-                      const std::vector<std::string> &species, const uint32_t size_per_prop,
-                      const std::string &out_dir);
+                      const std::vector<std::string> &species,
+                      const uint32_t size_per_prop, const std::string &out_dir);
 
-  void processCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter,
-                         const std::string &out_dir, const std::vector<std::string> &species);
+  void processCheckpoint(uint32_t &current_iter, const std::string &out_dir,
+                         const std::vector<std::string> &species);
 
+  /* Returnn rollback target or nullopt and sets flush_request when threshold is exceeded.
+  It reports the cells which exceed the threshold. */
   std::optional<uint32_t> findRbTarget(const std::vector<std::string> &species);
 
   bool getFlushRequest() const { return flush_request; }
@@ -88,20 +93,38 @@ public:
   auto getMetricsWriteTime() const { return stats_t; }
 
 private:
-  void updateSurrState(ChemistryModule &chem, bool dht_enabled, bool interp_enabled);
+  void updateSurrState(bool dht_enabled, bool interp_enabled);
 
-  void readCheckpoint(DiffusionModule &diffusion, uint32_t &current_iter, uint32_t rollback_iter,
+  void readCheckpoint(uint32_t &current_iter, uint32_t rollback_iter,
                       const std::string &out_dir);
-  void writeCheckpoint(DiffusionModule &diffusion, uint32_t &iter, const std::string &out_dir);
+  void writeCheckpoint(uint32_t &iter, const std::string &out_dir);
 
   uint32_t calcRbIter();
 
+  void computeSpeciesMetrics(const std::vector<std::vector<double>> &ref_values,
+                             const std::vector<std::vector<double>> &sur_values,
+                             const std::vector<std::string> &species,
+                             uint32_t size_per_prop, SpeciesMetrics &s_metrics);
+
+  void computeCellMetrics(const std::vector<std::vector<double>> &ref_values,
+                          const std::vector<std::vector<double>> &sur_values,
+                          CellMetrics &c_metrics);
+
+  inline double computeAlpha(double ref, double sur) const;
+
+  static void printExceedingCells(const CellMetrics &c_hist, size_t sp_idx,
+                                  double sp_thr);
+
+  inline bool rbLimitReached() const;
+
   ControlConfig config;
+  ChemistryModule &chem_;
 
   std::uint32_t global_iter = 0;
   std::uint32_t rb_count = 0;
   std::uint32_t rb_limit = 0;
   std::uint32_t stab_countdown = 0;
+  std::uint32_t surr_active = 0;
   std::vector<uint32_t> ctrl_cell_ids;
 
   bool rb_enabled = false;

@@ -44,8 +44,7 @@ public:
    * \param wp_size Count of grid cells to fill each work package at maximum.
    * \param communicator MPI communicator to distribute work in.
    */
-  ChemistryModule(uint32_t wp_size,
-                  const InitialList::ChemistryInit chem_params,
+  ChemistryModule(uint32_t wp_size, const InitialList::ChemistryInit chem_params,
                   MPI_Comm communicator);
 
   /**
@@ -71,8 +70,7 @@ public:
   auto GetChemistryTime() const { return this->chem_t; }
 
   void setFilePadding(std::uint32_t maxiter) {
-    this->file_pad =
-        static_cast<std::uint8_t>(std::ceil(std::log10(maxiter + 1)));
+    this->file_pad = static_cast<std::uint8_t>(std::ceil(std::log10(maxiter + 1)));
   }
 
   struct SurrogateSetup {
@@ -105,8 +103,7 @@ public:
     this->ctrl_file_out_dir = setup.dht_out_dir;
 
     if (this->dht_enabled || this->interp_enabled) {
-      this->initializeDHT(setup.dht_size_mb, this->params.dht_species,
-                          setup.has_het_ids);
+      this->initializeDHT(setup.dht_size_mb, this->params.dht_species, setup.has_het_ids);
 
       if (setup.dht_snaps != DHT_SNAPS_DISABLED) {
         this->setDHTSnapshots(setup.dht_snaps, setup.dht_out_dir);
@@ -115,8 +112,7 @@ public:
 
     if (this->interp_enabled) {
       this->initializeInterp(setup.interp_bucket_size, setup.interp_size_mb,
-                             setup.interp_min_entries,
-                             this->params.interp_species);
+                             setup.interp_min_entries, this->params.interp_species);
     }
   }
 
@@ -239,9 +235,7 @@ public:
    *
    * \param enabled True if print progressbar, false if not.
    */
-  void setProgressBarPrintout(bool enabled) {
-    this->print_progessbar = enabled;
-  };
+  void setProgressBarPrintout(bool enabled) { this->print_progessbar = enabled; };
 
   /**
    *  **Master only** Set the ai surrogate validity vector from R
@@ -275,8 +269,7 @@ public:
   }
 
 protected:
-  void initializeDHT(uint32_t size_mb,
-                     const NamedVector<std::uint32_t> &key_species,
+  void initializeDHT(uint32_t size_mb, const NamedVector<std::uint32_t> &key_species,
                      bool has_het_ids);
   void setDHTSnapshots(int type, const std::string &out_dir);
   void setDHTReadFile(const std::string &input_file);
@@ -349,9 +342,8 @@ protected:
   void MasterRunSequential();
 
   void MasterSendPkgs(worker_list_t &w_list, workpointer_t &work_pointer,
-                      workpointer_t &sur_pointer, int &pkg_to_send,
-                      int &count_pkgs, int &free_workers, double dt,
-                      uint32_t iteration,
+                      workpointer_t &sur_pointer, int &pkg_to_send, int &count_pkgs,
+                      int &free_workers, double dt, uint32_t iteration,
                       const std::vector<uint32_t> &wp_sizes_vector);
   void MasterRecvPkgs(worker_list_t &w_list, int &pkg_to_recv, bool to_send,
                       int &free_workers);
@@ -361,8 +353,7 @@ protected:
 
   void WorkerProcessPkgs(struct worker_s &timings, uint32_t &iteration);
 
-  void WorkerDoWork(MPI_Status &probe_status, int double_count,
-                    struct worker_s &timings);
+  void WorkerDoWork(MPI_Status &probe_status, int double_count, struct worker_s &timings);
   void WorkerPostIter(MPI_Status &probe_status, uint32_t iteration);
   void WorkerPostSim(uint32_t iteration);
 
@@ -372,26 +363,23 @@ protected:
   void WorkerPerfToMaster(int type, const struct worker_s &timings);
   void WorkerMetricsToMaster(int type);
 
-  void WorkerRunWorkPackage(WorkPackage &work_package, double dSimTime,
-                            double dTimestep);
+  void WorkerRunWorkPackage(WorkPackage &work_package, double dSimTime, double dTimestep);
 
-  std::vector<uint32_t> CalculateWPSizesVector(uint32_t n_cells,
-                                               uint32_t wp_size) const;
+  std::vector<uint32_t> CalculateWPSizesVector(uint32_t n_cells, uint32_t wp_size) const;
   std::vector<double> shuffleField(const std::vector<double> &in_field,
                                    uint32_t size_per_prop, uint32_t prop_count,
                                    uint32_t wp_count);
-  void unshuffleField(const std::vector<double> &in_buffer,
-                      uint32_t size_per_prop, uint32_t prop_count,
-                      uint32_t wp_count, std::vector<double> &out_field);
+  void unshuffleField(const std::vector<double> &in_buffer, uint32_t size_per_prop,
+                      uint32_t prop_count, uint32_t wp_count,
+                      std::vector<double> &out_field);
   std::vector<std::int32_t>
   parseDHTSpeciesVec(const NamedVector<std::uint32_t> &key_species,
                      const std::vector<std::string> &to_compare) const;
 
   void BCastStringVec(std::vector<std::string> &io);
 
-  void processCtrlPkgs(std::vector<std::vector<double>> &input,
-                       double current_sim_time, double dt,
-                       struct worker_s &timings);
+  void processCtrlPkgs(std::vector<std::vector<double>> &input, double current_sim_time,
+                       double dt, struct worker_s &timings);
 
   void copyPkgs(const WorkPackage &wp, std::vector<double> &mpi_buffer);
 
@@ -408,7 +396,11 @@ protected:
   }
   inline bool hasFlag(int flags, int type) { return (flags & type) != 0; }
 
-  
+  inline void
+  extractCtrlSurVectors(std::unordered_map<uint32_t, std::vector<double>> ctrl_output,
+                        const std::vector<double> &buffer, uint32_t n_cells,
+                        uint32_t prop_count, std::vector<std::vector<double>> &ctrl_vec,
+                        std::vector<std::vector<double>> &sur_vec);
 
   int comm_size, comm_rank;
   MPI_Comm group_comm;
@@ -434,11 +426,7 @@ protected:
     MPI_Bcast(buf, count, datatype, 0, this->group_comm);
   }
 
-  inline void PropagateFunctionType(int &type) const {
-    ChemBCast(&type, 1, MPI_INT);
-  }
-
-
+  inline void PropagateFunctionType(int &type) const { ChemBCast(&type, 1, MPI_INT); }
 
   double simtime = 0.;
   double idle_t = 0.;
@@ -476,7 +464,7 @@ protected:
   bool control_enabled{false};
   bool stab_enabled{false};
   std::unordered_set<uint32_t> ctrl_cell_ids;
-  std::vector<std::vector<double>> ctrl_batch;
+  std::unordered_map<uint32_t, std::vector<double>> ctrl_batch;
 };
 } // namespace poet
 
