@@ -155,6 +155,7 @@ include/
 # But keep these specific files
 !bin/plot/
 !bin/dolo_fgcs_3.qs2
+!bin/dolo_fgcs_3_rt.R
 !bin/dolo_fgcs_3.R
 !bin/dolo_fgcs_3.pqi
 !bin/phreeqc_kin.dat
