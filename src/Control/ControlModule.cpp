@@ -33,7 +33,7 @@ void poet::ControlModule::beginIteration(const uint32_t &iter, const bool &dht_e
 void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled) {
 
   bool in_warmup = (global_iter <= config.ctrl_interval);
-  bool rb_limit_reached = (rb_count >= config.rb_limit);
+  bool rb_limit_reached = rbLimitReached();
 
   if (rb_enabled && stab_countdown > 0 && !rb_limit_reached) {
     --stab_countdown;
@@ -54,9 +54,18 @@ void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled)
     } else {
       std::cout << "In stabilization phase." << std::endl;
     }
-
     return;
   }
+
+  if (rb_count > 0 && !rb_enabled && !in_warmup) {
+    surr_active++;
+    if (surr_active > config.rb_interval_limit) {
+      surr_active = 0;
+      rb_count -= 1;
+      std::cout << "Rollback count reset to: " << rb_count << "." << std::endl;
+    }
+  }
+
   /* enable user-requested surrogates */
   chem->SetStabEnabled(false);
   chem->SetDhtEnabled(dht_enabled);
@@ -80,7 +89,8 @@ void poet::ControlModule::readCheckpoint(uint32_t &current_iter, uint32_t rollba
   double r_check_a, r_check_b;
   r_check_a = MPI_Wtime();
   Checkpoint_s checkpoint_read{.field = chem->getField()};
-  read_checkpoint(out_dir, "checkpoint" + std::to_string(rollback_iter) + ".hdf5", checkpoint_read);
+  read_checkpoint(out_dir, "checkpoint" + std::to_string(rollback_iter) + ".hdf5",
+                  checkpoint_read);
   current_iter = checkpoint_read.iteration;
   r_check_b = MPI_Wtime();
   r_check_t += r_check_b - r_check_a;
@@ -102,20 +112,22 @@ void poet::ControlModule::writeMetrics(const std::string &out_dir,
 
 uint32_t poet::ControlModule::calcRbIter() {
 
-  uint32_t last_iter = ((global_iter - 1) / config.chkpt_interval) * config.chkpt_interval;
+  uint32_t last_iter =
+      ((global_iter - 1) / config.chkpt_interval) * config.chkpt_interval;
 
   uint32_t rb_iter = (last_iter <= last_chkpt_written) ? last_iter : last_chkpt_written;
   return rb_iter;
 }
 
-std::optional<uint32_t> poet::ControlModule::findRbTarget(const std::vector<std::string> &species) {
+std::optional<uint32_t>
+poet::ControlModule::findRbTarget(const std::vector<std::string> &species) {
 
   if (metrics_history.empty()) {
     std::cout << "No error history yet, skipping rollback check." << std::endl;
     flush_request = false;
     return std::nullopt;
   }
-  if (rb_count > config.rb_limit) {
+  if (rbLimitReached()) {
     std::cout << "Rollback limit reached, skipping control logic." << std::endl;
     flush_request = false;
     return std::nullopt;
@@ -126,14 +138,19 @@ std::optional<uint32_t> poet::ControlModule::findRbTarget(const std::vector<std:
 
   double r_check_a, r_check_b;
   const auto &mape = metrics_history.back().mape;
-  for (uint32_t i = 0; i < species.size(); ++i) {
+  for (uint32_t sp_idx = 0; sp_idx < species.size(); ++sp_idx) {
 
-    if (mape[i] == 0) {
+    if (mape[sp_idx] == 0) {
       continue;
     }
-    if (mape[i] > config.mape_threshold[i]) {
-      std::cout << "Species " << species[i] << " MAPE=" << mape[i]
-                << " threshold=" << config.mape_threshold[i] << std::endl;
+    /* skip Charge */
+    if (sp_idx == 4) {
+      continue;
+    }
+
+    if (mape[sp_idx] > config.mape_threshold[sp_idx]) {
+      std::cout << "Species " << species[sp_idx] << " MAPE=" << mape[sp_idx]
+                << " threshold=" << config.mape_threshold[sp_idx] << std::endl;
 
       if (last_chkpt_written == 0) {
         std::cout << " Threshold exceeded but no checkpoint exists yet." << std::endl;
@@ -141,9 +158,10 @@ std::optional<uint32_t> poet::ControlModule::findRbTarget(const std::vector<std:
       }
       // rb_enabled = true;
       flush_request = true;
-      std::cout << "Threshold exceeded " << species[i] << " has MAPE = " << std::to_string(mape[i])
-                << " exceeding threshold = " << std::to_string(config.mape_threshold[i])
-                << std::endl;
+      std::cout << "Threshold exceeded " << species[sp_idx]
+                << " has MAPE = " << std::to_string(mape[sp_idx])
+                << " exceeding threshold = "
+                << std::to_string(config.mape_threshold[sp_idx]) << std::endl;
       return calcRbIter();
     }
   }
@@ -157,16 +175,16 @@ void poet::ControlModule::computeMetrics(const std::vector<double> &reference_va
                                          const uint32_t size_per_prop,
                                          const std::vector<std::string> &species) {
 
-  if (rb_count > config.rb_limit) {
+  if (rbLimitReached()) {
     return;
   }
 
   SpeciesMetrics metrics(species.size(), global_iter, rb_count);
 
-  for (uint32_t i = 0; i < species.size(); ++i) {
+  for (uint32_t sp_idx = 0; sp_idx < species.size(); ++sp_idx) {
     double err_sum = 0.0;
     double sqr_err_sum = 0.0;
-    uint32_t base_idx = i * size_per_prop;
+    uint32_t base_idx = sp_idx * size_per_prop;
 
     for (uint32_t j = 0; j < size_per_prop; ++j) {
       const double ref_value = reference_values[base_idx + j];
@@ -187,16 +205,17 @@ void poet::ControlModule::computeMetrics(const std::vector<double> &reference_va
         sqr_err_sum += alpha * alpha;
       }
     }
-    metrics.mape[i] = 100.0 * (err_sum / size_per_prop);
-    metrics.rrmse[i] = std::sqrt(sqr_err_sum / size_per_prop);
+    metrics.mape[sp_idx] = 100.0 * (err_sum / size_per_prop);
+    metrics.rrmse[sp_idx] = std::sqrt(sqr_err_sum / size_per_prop);
   }
   metrics_history.push_back(metrics);
 }
 
-void poet::ControlModule::processCheckpoint(uint32_t &current_iter, const std::string &out_dir,
+void poet::ControlModule::processCheckpoint(uint32_t &current_iter,
+                                            const std::string &out_dir,
                                             const std::vector<std::string> &species) {
 
-  if (!ctrl_active || rb_count > config.rb_limit) {
+  if (!ctrl_active || rbLimitReached()) {
     return;
   }
 
@@ -208,19 +227,20 @@ void poet::ControlModule::processCheckpoint(uint32_t &current_iter, const std::s
     rb_count++;
     stab_countdown = config.ctrl_interval;
 
-    std::cout << "Restored checkpoint " << std::to_string(target) << ", surrogates disabled for "
-              << config.ctrl_interval << std::endl;
+    std::cout << "Restored checkpoint " << std::to_string(target)
+              << ", surrogates disabled for " << config.ctrl_interval << std::endl;
   } else {
     writeCheckpoint(global_iter, out_dir);
   }
 }
 
 bool poet::ControlModule::needsFlagBcast() const {
-  if (rb_count > config.rb_limit) {
+  return (config.rb_limit > 0) && !rbLimitReached();
+}
+
+inline bool poet::ControlModule::rbLimitReached() const {
+  /* rollback is completly disabled */
+  if (config.rb_limit == 0)
     return false;
-  }
-  if (global_iter == 1 || global_iter % config.ctrl_interval == 1) {
-    return true;
-  }
-  return false;
+  return rb_count >= config.rb_limit;
 }

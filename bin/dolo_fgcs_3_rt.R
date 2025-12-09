@@ -6,6 +6,7 @@ mape_threshold <- rep(0.0035, 13)
 mape_threshold[5] <- 1 #Charge
 zero_abs <- 1e-13
 rb_limit <- 3
+rb_interval_limit <- 100
 
 #ctrl_cell_ids <- seq(0, (400*400)/2 - 1, by = 401)
 #out_save <- seq(500, iterations, by = 500)
@@ -20,5 +21,6 @@ list(
     ctrl_interval = ctrl_interval,
     mape_threshold = mape_threshold,
     zero_abs = zero_abs,
-    rb_limit = rb_limit
+    rb_limit = rb_limit,
+    rb_interval_limit = rb_interval_limit
 )

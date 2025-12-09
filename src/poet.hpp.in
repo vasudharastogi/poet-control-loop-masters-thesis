@@ -54,6 +54,7 @@ struct RuntimeParameters {
   std::uint32_t chkpt_interval = 0;
   std::uint32_t ctrl_interval = 0;
   std::uint32_t rb_limit = 0;
+  std::uint32_t rb_interval_limit = 0;
   std::vector<double> mape_threshold;
   double zero_abs = 0.0;
 

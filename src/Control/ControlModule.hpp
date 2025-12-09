@@ -17,6 +17,7 @@ struct ControlConfig {
   uint32_t ctrl_interval = 0;
   uint32_t chkpt_interval = 0;
   uint32_t rb_limit = 0;
+  uint32_t rb_interval_limit = 0;
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };
@@ -28,8 +29,7 @@ struct SpeciesMetrics {
   uint32_t rb_count = 0;
 
   SpeciesMetrics(uint32_t n_species, uint32_t iter, uint32_t count)
-      : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter),
-        rb_count(count) {}
+      : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter), rb_count(count) {}
 };
 
 class ControlModule {
@@ -41,27 +41,22 @@ public:
 
   void writeCheckpoint(uint32_t &iter, const std::string &out_dir);
 
-  void writeMetrics(const std::string &out_dir,
-                         const std::vector<std::string> &species);
+  void writeMetrics(const std::string &out_dir, const std::vector<std::string> &species);
 
   std::optional<uint32_t> findRbTarget();
 
   void computeMetrics(const std::vector<double> &reference_values,
-                           const std::vector<double> &surrogate_values,
-                           const uint32_t size_per_prop,
-                           const std::vector<std::string> &species);
+                      const std::vector<double> &surrogate_values,
+                      const uint32_t size_per_prop,
+                      const std::vector<std::string> &species);
 
-  void processCheckpoint(uint32_t &current_iter,
-                         const std::string &out_dir,
+  void processCheckpoint(uint32_t &current_iter, const std::string &out_dir,
                          const std::vector<std::string> &species);
 
-  std::optional<uint32_t>
-  findRbTarget(const std::vector<std::string> &species);
+  std::optional<uint32_t> findRbTarget(const std::vector<std::string> &species);
 
   bool needsFlagBcast() const;
-  bool isCtrlIntervalActive() const {
-    return this->ctrl_active;
-  }
+  bool isCtrlIntervalActive() const { return this->ctrl_active; }
 
   bool getFlushRequest() const { return flush_request; }
   void clearFlushRequest() { flush_request = false; }
@@ -76,10 +71,12 @@ public:
 private:
   void updateSurrState(bool dht_enabled, bool interp_enabled);
 
-  void readCheckpoint(uint32_t &current_iter,
-                      uint32_t rollback_iter, const std::string &out_dir);
+  void readCheckpoint(uint32_t &current_iter, uint32_t rollback_iter,
+                      const std::string &out_dir);
 
   uint32_t calcRbIter();
+
+  inline bool rbLimitReached() const;
 
   ControlConfig config;
   ChemistryModule *chem = nullptr;
@@ -87,6 +84,7 @@ private:
   std::uint32_t global_iter = 0;
   std::uint32_t rb_count = 0;
   std::uint32_t stab_countdown = 0;
+  std::uint32_t surr_active = 0;
   std::uint32_t last_chkpt_written = 0;
 
   bool rb_enabled = false;

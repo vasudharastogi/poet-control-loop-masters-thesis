@@ -99,9 +99,8 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
                "Print progress bar during chemical simulation");
 
   /*Parse work package size*/
-  app.add_option(
-         "-w,--work-package-size", params.work_package_size,
-         "Work package size to distribute to each worker for chemistry module")
+  app.add_option("-w,--work-package-size", params.work_package_size,
+                 "Work package size to distribute to each worker for chemistry module")
       ->check(CLI::PositiveNumber)
       ->default_val(RuntimeParameters::WORK_PACKAGE_SIZE_DEFAULT);
 
@@ -112,9 +111,7 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
 
   // cout << "CPP: DHT is " << ( dht_enabled ? "ON" : "OFF" ) << '\n';
 
-  dht_group
-      ->add_option("--dht-size", params.dht_size,
-                   "DHT size per process in Megabyte")
+  dht_group->add_option("--dht-size", params.dht_size, "DHT size per process in Megabyte")
       ->check(CLI::PositiveNumber)
       ->default_val(RuntimeParameters::DHT_SIZE_DEFAULT);
   // cout << "CPP: DHT size per process (Byte) = " << dht_size_per_process <<
@@ -140,9 +137,8 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
       ->check(CLI::PositiveNumber)
       ->default_val(RuntimeParameters::INTERP_MIN_ENTRIES_DEFAULT);
   interp_group
-      ->add_option(
-          "--interp-bucket-entries", params.interp_bucket_entries,
-          "Maximum number of entries in each bucket of the interpolation table")
+      ->add_option("--interp-bucket-entries", params.interp_bucket_entries,
+                   "Maximum number of entries in each bucket of the interpolation table")
       ->check(CLI::PositiveNumber)
       ->default_val(RuntimeParameters::INTERP_BUCKET_ENTRIES_DEFAULT);
 
@@ -152,25 +148,21 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
   app.add_flag("--rds", params.as_rds,
                "Save output as .rds file instead of default .qs2");
 
-  app.add_flag("--qs", params.as_qs,
-               "Save output as .qs file instead of default .qs2");
+  app.add_flag("--qs", params.as_qs, "Save output as .qs file instead of default .qs2");
 
   std::string init_file;
   std::string runtime_file;
 
-  app.add_option("runtime_file", runtime_file,
-                 "Runtime R script defining the simulation")
+  app.add_option("runtime_file", runtime_file, "Runtime R script defining the simulation")
       ->required()
       ->check(CLI::ExistingFile);
 
-  app.add_option(
-         "init_file", init_file,
-         "Initial R script defining the simulation, produced by poet_init")
+  app.add_option("init_file", init_file,
+                 "Initial R script defining the simulation, produced by poet_init")
       ->required()
       ->check(CLI::ExistingFile);
 
-  app.add_option("out_dir", params.out_dir,
-                 "Output directory of the simulation")
+  app.add_option("out_dir", params.out_dir, "Output directory of the simulation")
       ->required();
 
   try {
@@ -202,8 +194,7 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
       // 	 << simparams.dht_significant_digits);
       // MSG("DHT logarithm before rounding: "
       // 	 << (simparams.dht_log ? "ON" : "OFF"));
-      MSG("DHT size per process (Megabyte) = " +
-          std::to_string(params.dht_size));
+      MSG("DHT size per process (Megabyte) = " + std::to_string(params.dht_size));
       MSG("DHT save snapshots is " + BOOL_PRINT(params.dht_snaps));
       // MSG("DHT load file is " + chem_params.dht_file);
     }
@@ -212,8 +203,7 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
       MSG("PHT interpolation enabled: " + BOOL_PRINT(params.use_interp));
       MSG("PHT interp-size = " + std::to_string(params.interp_size));
       MSG("PHT interp-min  = " + std::to_string(params.interp_min_entries));
-      MSG("PHT interp-bucket-entries = " +
-          std::to_string(params.interp_bucket_entries));
+      MSG("PHT interp-bucket-entries = " + std::to_string(params.interp_bucket_entries));
     }
   }
   // chem_params.dht_outdir = out_dir;
@@ -253,10 +243,11 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("ctrl_interval"));
     params.chkpt_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("chkpt_interval"));
-    params.rb_limit =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_limit"));
-    params.mape_threshold = Rcpp::as<std::vector<double>>(
-        global_rt_setup->operator[]("mape_threshold"));
+    params.rb_limit = Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_limit"));
+    params.rb_interval_limit =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_interval_limit"));
+    params.mape_threshold =
+        Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("mape_threshold"));
     params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
   } catch (const std::exception &e) {
     ERRMSG("Error while parsing R scripts: " + std::string(e.what()));
@@ -278,16 +269,15 @@ void call_master_iter_end(RInside &R, const Field &trans, const Field &chem) {
   R["TMP"] = Rcpp::wrap(chem.AsVector());
   R["TMP_PROPS"] = Rcpp::wrap(chem.GetProps());
   R.parseEval(std::string("state_C <- setNames(data.frame(matrix(TMP, nrow=" +
-                          std::to_string(chem.GetRequestedVecSize()) +
-                          ")), TMP_PROPS)"));
+                          std::to_string(chem.GetRequestedVecSize()) + ")), TMP_PROPS)"));
   R["setup"] = *global_rt_setup;
   R.parseEval("setup <- master_iteration_end(setup, state_T, state_C)");
   *global_rt_setup = R["setup"];
 }
 
 static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
-                                DiffusionModule &diffusion,
-                                ChemistryModule &chem, ControlModule &control) {
+                                DiffusionModule &diffusion, ChemistryModule &chem,
+                                ControlModule &control) {
 
   /* Iteration Count is dynamic, retrieving value from R (is only needed by
    * master for the following loop) */
@@ -327,10 +317,9 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
       double ai_start_t = MPI_Wtime();
       // Save current values from the tug field as predictor for the ai step
       R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
-      R.parseEval(
-          std::string("predictors <- setNames(data.frame(matrix(TMP, nrow=" +
-                      std::to_string(chem.getField().GetRequestedVecSize()) +
-                      ")), TMP_PROPS)"));
+      R.parseEval(std::string("predictors <- setNames(data.frame(matrix(TMP, nrow=" +
+                              std::to_string(chem.getField().GetRequestedVecSize()) +
+                              ")), TMP_PROPS)"));
       R.parseEval("predictors <- predictors[ai_surrogate_species]");
 
       // Apply preprocessing
@@ -339,8 +328,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
 
       // Predict
       MSG("AI Prediction");
-      R.parseEval(
-          "aipreds_scaled <- prediction_step(model, predictors_scaled)");
+      R.parseEval("aipreds_scaled <- prediction_step(model, predictors_scaled)");
 
       // Apply postprocessing
       MSG("AI Postprocessing");
@@ -348,8 +336,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
 
       // Validate prediction and write valid predictions to chem field
       MSG("AI Validation");
-      R.parseEval(
-          "validity_vector <- validate_predictions(predictors, aipreds)");
+      R.parseEval("validity_vector <- validate_predictions(predictors, aipreds)");
 
       MSG("AI Marking accepted");
       chem.set_ai_surrogate_validity_vector(R.parseEval("validity_vector"));
@@ -361,9 +348,8 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
                        validity_vector)");
 
       MSG("AI Set Field");
-      Field predictions_field =
-          Field(R.parseEval("nrow(predictors)"), RTempField,
-                R.parseEval("colnames(predictors)"));
+      Field predictions_field = Field(R.parseEval("nrow(predictors)"), RTempField,
+                                      R.parseEval("colnames(predictors)"));
 
       MSG("AI Update");
       chem.getField().update(predictions_field);
@@ -378,10 +364,9 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
       double ai_start_t = MPI_Wtime();
 
       R["TMP"] = Rcpp::wrap(chem.getField().AsVector());
-      R.parseEval(
-          std::string("targets <- setNames(data.frame(matrix(TMP, nrow=" +
-                      std::to_string(chem.getField().GetRequestedVecSize()) +
-                      ")), TMP_PROPS)"));
+      R.parseEval(std::string("targets <- setNames(data.frame(matrix(TMP, nrow=" +
+                              std::to_string(chem.getField().GetRequestedVecSize()) +
+                              ")), TMP_PROPS)"));
       R.parseEval("targets <- targets[ai_surrogate_species]");
 
       // TODO: Check how to get the correct columns
@@ -414,8 +399,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
         std::to_string(maxiter));
 
     if (control.isCtrlIntervalActive()) {
-      control.processCheckpoint(iter, params.out_dir,
-                                chem.getField().GetProps());
+      control.processCheckpoint(iter, params.out_dir, chem.getField().GetProps());
       control.writeMetrics(params.out_dir, chem.getField().GetProps());
     }
     // MSG();
@@ -452,16 +436,12 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   //}
 
   if (params.use_interp) {
-    chem_profiling["interp_w"] =
-        Rcpp::wrap(chem.GetWorkerInterpolationWriteTimings());
-    chem_profiling["interp_r"] =
-        Rcpp::wrap(chem.GetWorkerInterpolationReadTimings());
-    chem_profiling["interp_g"] =
-        Rcpp::wrap(chem.GetWorkerInterpolationGatherTimings());
+    chem_profiling["interp_w"] = Rcpp::wrap(chem.GetWorkerInterpolationWriteTimings());
+    chem_profiling["interp_r"] = Rcpp::wrap(chem.GetWorkerInterpolationReadTimings());
+    chem_profiling["interp_g"] = Rcpp::wrap(chem.GetWorkerInterpolationGatherTimings());
     chem_profiling["interp_fc"] =
         Rcpp::wrap(chem.GetWorkerInterpolationFunctionCallTimings());
-    chem_profiling["interp_calls"] =
-        Rcpp::wrap(chem.GetWorkerInterpolationCalls());
+    chem_profiling["interp_calls"] = Rcpp::wrap(chem.GetWorkerInterpolationCalls());
     chem_profiling["interp_cached"] = Rcpp::wrap(chem.GetWorkerPHTCacheHits());
   }
 
@@ -476,8 +456,7 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   return profiling;
 }
 
-std::vector<std::string> getSpeciesNames(const Field &&field, int root,
-                                         MPI_Comm comm) {
+std::vector<std::string> getSpeciesNames(const Field &&field, int root, MPI_Comm comm) {
   std::uint32_t n_elements;
   std::uint32_t n_string_size;
 
@@ -494,8 +473,8 @@ std::vector<std::string> getSpeciesNames(const Field &&field, int root,
     for (std::uint32_t i = 0; i < n_elements; i++) {
       n_string_size = field.GetProps()[i].size();
       MPI_Bcast(&n_string_size, 1, MPI_UINT32_T, root, MPI_COMM_WORLD);
-      MPI_Bcast(const_cast<char *>(field.GetProps()[i].c_str()), n_string_size,
-                MPI_CHAR, root, MPI_COMM_WORLD);
+      MPI_Bcast(const_cast<char *>(field.GetProps()[i].c_str()), n_string_size, MPI_CHAR,
+                root, MPI_COMM_WORLD);
     }
 
     return field.GetProps();
@@ -609,8 +588,8 @@ int main(int argc, char *argv[]) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    ChemistryModule chemistry(run_params.work_package_size,
-                              init_list.getChemistryInit(), MPI_COMM_WORLD);
+    ChemistryModule chemistry(run_params.work_package_size, init_list.getChemistryInit(),
+                              MPI_COMM_WORLD);
 
     // ControlModule control;
     // chemistry.SetControlModule(&control);
@@ -633,8 +612,8 @@ int main(int argc, char *argv[]) {
     chemistry.masterEnableSurrogates(surr_setup);
 
     ControlConfig config(run_params.ctrl_interval, run_params.chkpt_interval,
-                         run_params.rb_limit, run_params.zero_abs,
-                         run_params.mape_threshold);
+                         run_params.rb_limit, run_params.rb_interval_limit,
+                         run_params.zero_abs, run_params.mape_threshold);
 
     ControlModule control(config, &chemistry);
 
@@ -660,8 +639,7 @@ int main(int argc, char *argv[]) {
         /* Incorporate ai surrogate from R */
         R.parseEvalQ(ai_surrogate_r_library);
         /* Use dht species for model input and output */
-        R["ai_surrogate_species"] =
-            init_list.getChemistryInit().dht_species.getNames();
+        R["ai_surrogate_species"] = init_list.getChemistryInit().dht_species.getNames();
 
         const std::string ai_surrogate_input_script =
             init_list.getChemistryInit().ai_surrogate_input_script;
@@ -678,13 +656,11 @@ int main(int argc, char *argv[]) {
 
       // MPI_Barrier(MPI_COMM_WORLD);
 
-      DiffusionModule diffusion(init_list.getDiffusionInit(),
-                                init_list.getInitialGrid());
+      DiffusionModule diffusion(init_list.getDiffusionInit(), init_list.getInitialGrid());
 
       chemistry.masterSetField(init_list.getInitialGrid());
 
-      Rcpp::List profiling =
-          RunMasterLoop(R, run_params, diffusion, chemistry, control);
+      Rcpp::List profiling = RunMasterLoop(R, run_params, diffusion, chemistry, control);
 
       MSG("finished simulation loop");
 
