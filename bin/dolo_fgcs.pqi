@@ -4,6 +4,8 @@ SOLUTION 1
     temperature	25
     pH	7
     pe	4
+    Mg 1e-12
+    Cl 2e-12
 PURE 1
     Calcite 0.0 1
 END
