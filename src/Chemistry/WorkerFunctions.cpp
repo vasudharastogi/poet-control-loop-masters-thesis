@@ -217,14 +217,12 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_co
   }
 
   /* skip simulation of cells cells where Cl concentration is below threshold */
-  /*
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     if (s_curr_wp.input[wp_i][CL_INDEX] < CL_THRESHOLD) {
       s_curr_wp.mapping[wp_i] = CHEM_SKIP;
       s_curr_wp.output[wp_i] = s_curr_wp.input[wp_i];
     }
   }
-  */
 
   // std::cout << this->comm_rank << ":" << counter++ << std::endl;
   if (dht_enabled || interp_enabled || stab_enabled) {

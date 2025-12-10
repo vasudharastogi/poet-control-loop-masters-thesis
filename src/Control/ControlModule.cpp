@@ -98,9 +98,12 @@ void poet::ControlModule::readCheckpoint(uint32_t &current_iter, uint32_t rollba
 
 void poet::ControlModule::writeMetrics(const std::string &out_dir,
                                        const std::vector<std::string> &species) {
-  if (rb_count > config.rb_limit) {
+
+  /*
+    if (rb_count > config.rb_limit) {
     return;
   }
+  */
   double stats_a, stats_b;
 
   stats_a = MPI_Wtime();
@@ -235,7 +238,16 @@ void poet::ControlModule::processCheckpoint(uint32_t &current_iter,
 }
 
 bool poet::ControlModule::needsFlagBcast() const {
-  return (config.rb_limit > 0) && !rbLimitReached();
+  // return (config.rb_limit > 0) && !rbLimitReached();
+  /*
+  if (rb_count > config.rb_limit) {
+    return false;
+  }
+    */
+  if (global_iter == 1 || global_iter % config.ctrl_interval == 1) {
+    return true;
+  }
+  return false;
 }
 
 inline bool poet::ControlModule::rbLimitReached() const {
