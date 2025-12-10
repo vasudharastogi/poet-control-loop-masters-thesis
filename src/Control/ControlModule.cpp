@@ -49,6 +49,8 @@ void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled)
     if (surr_active > config.rb_interval_limit) {
       surr_active = 0;
       rb_count -= 1;
+      std::cout << "Surr active counter: " << surr_active
+                << ", rb interval limit: " << config.rb_interval_limit << std::endl;
       std::cout << "Rollback count reset to: " << rb_count << "." << std::endl;
     }
   }
@@ -102,6 +104,10 @@ uint32_t poet::ControlModule::calcRbIter() {
 
 std::optional<uint32_t>
 poet::ControlModule::findRbTarget(const std::vector<std::string> &species) {
+
+  if (rbLimitReached()) {
+    return std::nullopt;
+  }
 
   /* Skip threshold checking if already in stabilization phase*/
   if (s_history.empty() || rb_enabled) {
@@ -270,6 +276,8 @@ void poet::ControlModule::processCheckpoint(uint32_t &current_iter,
 }
 
 bool poet::ControlModule::needsFlagBcast() const {
+  // Keep broadcasting flags so all ranks disable interpolation even after rb_limit is
+  // reached
   return (config.rb_limit > 0) && !rbLimitReached();
 }
 

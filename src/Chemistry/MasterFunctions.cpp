@@ -457,13 +457,13 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     ChemBCast(&this->ai_surrogate_validity_vector.front(), this->n_cells, MPI_INT);
   }
 
-  if (control->needsFlagBcast()) {
+  //if (control->needsFlagBcast()) {
     ftype = CHEM_CTRL_FLAGS;
     PropagateFunctionType(ftype);
     uint32_t ctrl_flags =
         buildCtrlFlags(this->dht_enabled, this->interp_enabled, this->stab_enabled);
     ChemBCast(&ctrl_flags, 1, MPI_UINT32_T);
-  }
+  //}
   this->ctrl_batch.clear();
 
   ftype = CHEM_WORK_LOOP;
