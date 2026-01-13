@@ -32,6 +32,14 @@ struct SpeciesMetrics {
       : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter), rb_count(count) {}
 };
 
+struct SurrState {
+  bool stab_enabled;
+  bool dht_enabled;
+  bool interp_enabled;
+};
+
+enum { WARMUP, SUR_ENABLED, STAB, SUR_DISABLED };
+
 class ControlModule {
 public:
   explicit ControlModule(const ControlConfig &config, ChemistryModule *chem);
@@ -78,6 +86,17 @@ private:
 
   inline bool rbLimitReached() const;
 
+  bool inWarmup() const;
+
+  SurrState getCurrPhase(bool dht_enabled, bool interp_enabled);
+  void setSurrState(const SurrState &state);
+
+  void trackStabPhase();
+
+  void trackSurrUptime();
+
+  void triggerRb(uint32_t &curr_iter, const std::string &out_dir);
+
   ControlConfig config;
   ChemistryModule *chem = nullptr;
 
@@ -91,7 +110,7 @@ private:
   bool ctrl_active = false;
   bool flush_request = false;
 
-  std::vector<SpeciesMetrics> metrics_history;
+  std::vector<SpeciesMetrics> s_history;
 
   double prep_t = 0.;
   double r_check_t = 0.;

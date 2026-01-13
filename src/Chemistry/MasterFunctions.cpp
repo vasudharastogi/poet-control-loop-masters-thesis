@@ -6,8 +6,7 @@
 #include <mpi.h>
 #include <vector>
 
-std::vector<uint32_t>
-poet::ChemistryModule::MasterGatherWorkerMetrics(int type) const {
+std::vector<uint32_t> poet::ChemistryModule::MasterGatherWorkerMetrics(int type) const {
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
 
   uint32_t dummy;
@@ -20,15 +19,13 @@ poet::ChemistryModule::MasterGatherWorkerMetrics(int type) const {
   return metrics;
 }
 
-std::vector<double>
-poet::ChemistryModule::MasterGatherWorkerTimings(int type) const {
+std::vector<double> poet::ChemistryModule::MasterGatherWorkerTimings(int type) const {
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
 
   double dummy;
   std::vector<double> timings(this->comm_size);
 
-  MPI_Gather(&dummy, 1, MPI_DOUBLE, timings.data(), 1, MPI_DOUBLE, 0,
-             this->group_comm);
+  MPI_Gather(&dummy, 1, MPI_DOUBLE, timings.data(), 1, MPI_DOUBLE, 0, this->group_comm);
 
   timings.erase(timings.begin());
   return timings;
@@ -94,28 +91,25 @@ std::vector<uint32_t> poet::ChemistryModule::GetWorkerDHTEvictions() const {
   MPI_Get_count(&probe, MPI_UINT32_T, &count);
 
   std::vector<uint32_t> ret(count);
-  MPI_Recv(ret.data(), count, MPI_UINT32_T, probe.MPI_SOURCE,
-           WORKER_DHT_EVICTIONS, this->group_comm, NULL);
+  MPI_Recv(ret.data(), count, MPI_UINT32_T, probe.MPI_SOURCE, WORKER_DHT_EVICTIONS,
+           this->group_comm, NULL);
 
   return ret;
 }
 
-std::vector<double>
-poet::ChemistryModule::GetWorkerInterpolationWriteTimings() const {
+std::vector<double> poet::ChemistryModule::GetWorkerInterpolationWriteTimings() const {
   int type = CHEM_PERF;
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
   return MasterGatherWorkerTimings(WORKER_IP_WRITE);
 }
 
-std::vector<double>
-poet::ChemistryModule::GetWorkerInterpolationReadTimings() const {
+std::vector<double> poet::ChemistryModule::GetWorkerInterpolationReadTimings() const {
   int type = CHEM_PERF;
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
   return MasterGatherWorkerTimings(WORKER_IP_READ);
 }
 
-std::vector<double>
-poet::ChemistryModule::GetWorkerInterpolationGatherTimings() const {
+std::vector<double> poet::ChemistryModule::GetWorkerInterpolationGatherTimings() const {
   int type = CHEM_PERF;
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
   return MasterGatherWorkerTimings(WORKER_IP_GATHER);
@@ -128,8 +122,7 @@ poet::ChemistryModule::GetWorkerInterpolationFunctionCallTimings() const {
   return MasterGatherWorkerTimings(WORKER_IP_FC);
 }
 
-std::vector<uint32_t>
-poet::ChemistryModule::GetWorkerInterpolationCalls() const {
+std::vector<uint32_t> poet::ChemistryModule::GetWorkerInterpolationCalls() const {
   int type = CHEM_PERF;
   MPI_Bcast(&type, 1, MPI_INT, 0, this->group_comm);
   type = WORKER_IP_CALLS;
@@ -159,15 +152,14 @@ std::vector<uint32_t> poet::ChemistryModule::GetWorkerPHTCacheHits() const {
   MPI_Get_count(&probe, MPI_UINT32_T, &count);
 
   std::vector<uint32_t> ret(count);
-  MPI_Recv(ret.data(), count, MPI_UINT32_T, probe.MPI_SOURCE, type,
-           this->group_comm, NULL);
+  MPI_Recv(ret.data(), count, MPI_UINT32_T, probe.MPI_SOURCE, type, this->group_comm,
+           NULL);
 
   return ret;
 }
 
 inline std::vector<int> shuffleVector(const std::vector<int> &in_vector,
-                                      uint32_t size_per_prop,
-                                      uint32_t wp_count) {
+                                      uint32_t size_per_prop, uint32_t wp_count) {
   std::vector<int> out_buffer(in_vector.size());
   uint32_t write_i = 0;
   for (uint32_t i = 0; i < wp_count; i++) {
@@ -180,16 +172,14 @@ inline std::vector<int> shuffleVector(const std::vector<int> &in_vector,
 }
 
 inline std::vector<double> shuffleField(const std::vector<double> &in_field,
-                                        uint32_t size_per_prop,
-                                        uint32_t species_count,
+                                        uint32_t size_per_prop, uint32_t species_count,
                                         uint32_t wp_count) {
   std::vector<double> out_buffer(in_field.size());
   uint32_t write_i = 0;
   for (uint32_t i = 0; i < wp_count; i++) {
     for (uint32_t j = i; j < size_per_prop; j += wp_count) {
       for (uint32_t k = 0; k < species_count; k++) {
-        out_buffer[(write_i * species_count) + k] =
-            in_field[(k * size_per_prop) + j];
+        out_buffer[(write_i * species_count) + k] = in_field[(k * size_per_prop) + j];
       }
       write_i++;
     }
@@ -197,16 +187,15 @@ inline std::vector<double> shuffleField(const std::vector<double> &in_field,
   return out_buffer;
 }
 
-inline void unshuffleField(const std::vector<double> &in_buffer,
-                           uint32_t size_per_prop, uint32_t species_count,
-                           uint32_t wp_count, std::vector<double> &out_field) {
+inline void unshuffleField(const std::vector<double> &in_buffer, uint32_t size_per_prop,
+                           uint32_t species_count, uint32_t wp_count,
+                           std::vector<double> &out_field) {
   uint32_t read_i = 0;
 
   for (uint32_t i = 0; i < wp_count; i++) {
     for (uint32_t j = i; j < size_per_prop; j += wp_count) {
       for (uint32_t k = 0; k < species_count; k++) {
-        out_field[(k * size_per_prop) + j] =
-            in_buffer[(read_i * species_count) + k];
+        out_field[(k * size_per_prop) + j] = in_buffer[(read_i * species_count) + k];
       }
       read_i++;
     }
@@ -244,9 +233,8 @@ inline uint32_t poet::ChemistryModule::buildCtrlFlags(bool dht, bool interp, boo
 }
 
 inline void poet::ChemistryModule::MasterSendPkgs(
-    worker_list_t &w_list, workpointer_t &work_pointer,
-    workpointer_t &sur_pointer, int &pkg_to_send, int &count_pkgs,
-    int &free_workers, double dt, uint32_t iteration,
+    worker_list_t &w_list, workpointer_t &work_pointer, workpointer_t &sur_pointer,
+    int &pkg_to_send, int &count_pkgs, int &free_workers, double dt, uint32_t iteration,
     const std::vector<uint32_t> &wp_sizes_vector) {
   /* declare variables */
   int local_work_package_size;
@@ -261,9 +249,8 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       local_work_package_size = (int)wp_sizes_vector[count_pkgs];
       count_pkgs++;
 
-      uint32_t wp_start_index =
-          std::accumulate(wp_sizes_vector.begin(),
-                          std::next(wp_sizes_vector.begin(), count_pkgs), 0);
+      uint32_t wp_start_index = std::accumulate(
+          wp_sizes_vector.begin(), std::next(wp_sizes_vector.begin(), count_pkgs), 0);
 
       /* note current processed work package in workerlist */
       w_list[p].send_addr = work_pointer.base();
@@ -300,8 +287,8 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       /* ATTENTION Worker p has rank p+1 */
       // MPI_Send(send_buffer, end_of_wp + BUFFER_OFFSET, MPI_DOUBLE, p + 1,
       //          LOOP_WORK, this->group_comm);
-      MPI_Send(send_buffer.data(), send_buffer.size(), MPI_DOUBLE, p + 1,
-               LOOP_WORK, this->group_comm);
+      MPI_Send(send_buffer.data(), send_buffer.size(), MPI_DOUBLE, p + 1, LOOP_WORK,
+               this->group_comm);
 
       /* Mark that worker has work to do */
       w_list[p].has_work = 1;
@@ -311,10 +298,8 @@ inline void poet::ChemistryModule::MasterSendPkgs(
   }
 }
 
-inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
-                                                  int &pkg_to_recv,
-                                                  bool to_send,
-                                                  int &free_workers) {
+inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list, int &pkg_to_recv,
+                                                  bool to_send, int &free_workers) {
   /* declare most of the variables here */
   int need_to_receive = 1;
   double idle_a, idle_b;
@@ -351,8 +336,8 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
     switch (probe_status.MPI_TAG) {
     case LOOP_WORK: {
       MPI_Get_count(&probe_status, MPI_DOUBLE, &size);
-      MPI_Recv(w_list[p - 1].send_addr, size, MPI_DOUBLE, p, LOOP_WORK,
-               this->group_comm, MPI_STATUS_IGNORE);
+      MPI_Recv(w_list[p - 1].send_addr, size, MPI_DOUBLE, p, LOOP_WORK, this->group_comm,
+               MPI_STATUS_IGNORE);
       handled = true;
       break;
     }
@@ -361,12 +346,11 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list,
       /* layout of buffer is [phreeqc][surrogate] */
       MPI_Get_count(&probe_status, MPI_DOUBLE, &size);
       recv_buffer.resize(size);
-      MPI_Recv(recv_buffer.data(), size, MPI_DOUBLE, p, LOOP_CTRL,
-               this->group_comm, MPI_STATUS_IGNORE);
+      MPI_Recv(recv_buffer.data(), size, MPI_DOUBLE, p, LOOP_CTRL, this->group_comm,
+               MPI_STATUS_IGNORE);
 
       int half = size / 2;
-      std::copy(recv_buffer.begin(), recv_buffer.begin() + half,
-                w_list[p - 1].send_addr);
+      std::copy(recv_buffer.begin(), recv_buffer.begin() + half, w_list[p - 1].send_addr);
 
       /*
       if (w_list[p - 1].surrogate_addr == nullptr) {
@@ -450,11 +434,9 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   if (this->ai_surrogate_enabled) {
     ftype = CHEM_AI_BCAST_VALIDITY;
     PropagateFunctionType(ftype);
-    this->ai_surrogate_validity_vector =
-        shuffleVector(this->ai_surrogate_validity_vector, this->n_cells,
-                      wp_sizes_vector.size());
-    ChemBCast(&this->ai_surrogate_validity_vector.front(), this->n_cells,
-              MPI_INT);
+    this->ai_surrogate_validity_vector = shuffleVector(
+        this->ai_surrogate_validity_vector, this->n_cells, wp_sizes_vector.size());
+    ChemBCast(&this->ai_surrogate_validity_vector.front(), this->n_cells, MPI_INT);
   }
 
   /* broadcast control state once every iteration */
@@ -464,10 +446,9 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   ChemBCast(&ctrl, 1, MPI_UINT32_T);
 
   if (control->needsFlagBcast()) {
-    int ftype = CHEM_CTRL_FLAGS;
+    ftype = CHEM_CTRL_FLAGS;
     PropagateFunctionType(ftype);
-    uint32_t ctrl_flags =
-        buildCtrlFlags(dht_enabled, interp_enabled, stab_enabled);
+    uint32_t ctrl_flags = buildCtrlFlags(dht_enabled, interp_enabled, stab_enabled);
     ChemBCast(&ctrl_flags, 1, MPI_UINT32_T);
 
     mpi_surr_buffer.assign(n_cells * prop_count, 0.0);
@@ -485,9 +466,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
   /* shuffle grid */
   // grid.shuffleAndExport(mpi_buffer);
-  std::vector<double> mpi_buffer =
-      shuffleField(chem_field.AsVector(), this->n_cells, this->prop_count,
-                   wp_sizes_vector.size());
+  std::vector<double> mpi_buffer = shuffleField(chem_field.AsVector(), this->n_cells,
+                                                this->prop_count, wp_sizes_vector.size());
 
   // Only resize surrogate buffer if control is enabled
   if (ctrl_enabled) {
@@ -523,8 +503,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     // while there are still packages to send
     if (pkg_to_send > 0) {
       // send packages to all free workers ...
-      MasterSendPkgs(worker_list, work_pointer, sur_pointer, pkg_to_send,
-                     i_pkgs, free_workers, dt, iteration, wp_sizes_vector);
+      MasterSendPkgs(worker_list, work_pointer, sur_pointer, pkg_to_send, i_pkgs,
+                     free_workers, dt, iteration, wp_sizes_vector);
     }
     // ... and try to receive them from workers who has finished their work
     MasterRecvPkgs(worker_list, pkg_to_recv, pkg_to_send > 0, free_workers);
@@ -543,8 +523,8 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
   /* unshuffle grid */
   // grid.importAndUnshuffle(mpi_buffer);
   std::vector<double> out_vec{mpi_buffer};
-  unshuffleField(mpi_buffer, this->n_cells, this->prop_count,
-                 wp_sizes_vector.size(), out_vec);
+  unshuffleField(mpi_buffer, this->n_cells, this->prop_count, wp_sizes_vector.size(),
+                 out_vec);
   chem_field = out_vec;
 
   /* do master stuff */
@@ -600,11 +580,9 @@ void poet::ChemistryModule::MasterLoopBreak() {
 }
 
 std::vector<uint32_t>
-poet::ChemistryModule::CalculateWPSizesVector(uint32_t n_cells,
-                                              uint32_t wp_size) const {
+poet::ChemistryModule::CalculateWPSizesVector(uint32_t n_cells, uint32_t wp_size) const {
   bool mod_pkgs = (n_cells % wp_size) != 0;
-  uint32_t n_packages =
-      (uint32_t)(n_cells / wp_size) + static_cast<int>(mod_pkgs);
+  uint32_t n_packages = (uint32_t)(n_cells / wp_size) + static_cast<int>(mod_pkgs);
 
   std::vector<uint32_t> wp_sizes_vector(n_packages, 0);
 
