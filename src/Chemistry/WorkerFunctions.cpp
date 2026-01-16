@@ -128,6 +128,14 @@ void poet::ChemistryModule::WorkerProcessPkgs(struct worker_s &timings,
     }
   }
 }
+
+void poet::ChemistryModule::copyCell(const WorkPackage &wp,
+                                     std::vector<double> &mpi_buffer, std::size_t offset,
+                                     std::size_t cell_idx) {
+  std::copy(wp.output[cell_idx].begin(), wp.output[cell_idx].end(),
+            mpi_buffer.begin() + offset + this->prop_count * cell_idx);
+}
+
 void poet::ChemistryModule::copyPkgs(const WorkPackage &wp,
                                      std::vector<double> &mpi_buffer,
                                      std::size_t offset) {
@@ -136,6 +144,7 @@ void poet::ChemistryModule::copyPkgs(const WorkPackage &wp,
               mpi_buffer.begin() + offset + this->prop_count * wp_i);
   }
 }
+
 void poet::ChemistryModule::copyCtrlPkgs(const WorkPackage &pqc_wp,
                                          const WorkPackage &surr_wp,
                                          std::vector<double> &mpi_buffer, int &count) {
@@ -148,13 +157,12 @@ void poet::ChemistryModule::copyCtrlPkgs(const WorkPackage &pqc_wp,
   // copy surrogate output after the the pqc output, mpi_buffer[pqc][interp]
 
   for (std::size_t wp_i = 0; wp_i < surr_wp.size; wp_i++) {
-
     if (surr_wp.mapping[wp_i] != CHEM_PQC) {
       // only copy if surrogate was used
-      copyPkgs(surr_wp, mpi_buffer, wp_offset);
+      copyCell(surr_wp, mpi_buffer, wp_offset, wp_i);
     } else {
       // if pqc was used, copy pqc results again
-      copyPkgs(pqc_wp, mpi_buffer, wp_offset);
+      copyCell(pqc_wp, mpi_buffer, wp_offset, wp_i);
     }
   }
   count += wp_offset;
@@ -217,14 +225,12 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_co
   }
 
   /* skip simulation of cells cells where Cl concentration is below threshold */
-  /*
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     if (s_curr_wp.input[wp_i][CL_INDEX] < CL_THRESHOLD) {
       s_curr_wp.mapping[wp_i] = CHEM_SKIP;
       s_curr_wp.output[wp_i] = s_curr_wp.input[wp_i];
     }
   }
-  */
 
   // std::cout << this->comm_rank << ":" << counter++ << std::endl;
   if (dht_enabled || interp_enabled || stab_enabled) {
@@ -252,16 +258,20 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_co
     }
   }
 
-  /* if control iteration: create copy surrogate results (output and mappings)
-    and then set them to zero, give this to phreeqc */
+  /* create a copy of surrogate results, reset the output and mappings
+    and simulate them again with phreeqc */
 
   poet::WorkPackage s_curr_wp_control = s_curr_wp;
 
   if (ctrl_enabled) {
     ctrl_cp_start = MPI_Wtime();
     for (std::size_t wp_i = 0; wp_i < s_curr_wp_control.size; wp_i++) {
-      s_curr_wp_control.output[wp_i] = std::vector<double>(this->prop_count, 0.0);
-      s_curr_wp_control.mapping[wp_i] = CHEM_PQC;
+      if (s_curr_wp_control.mapping[wp_i] == CHEM_SKIP) {
+        continue;
+      } else {
+        s_curr_wp_control.output[wp_i] = std::vector<double>(this->prop_count, 0.0);
+        s_curr_wp_control.mapping[wp_i] = CHEM_PQC;
+      }
     }
     ctrl_cp_end = MPI_Wtime();
     timings.ctrl_t += ctrl_cp_end - ctrl_cp_start;

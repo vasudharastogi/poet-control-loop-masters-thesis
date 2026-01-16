@@ -17,7 +17,7 @@ struct ControlConfig {
   uint32_t ctrl_interval = 0;
   uint32_t chkpt_interval = 0;
   uint32_t rb_limit = 0;
-  uint32_t rb_interval_limit = 0;
+  uint32_t rb_aging_limit = 0;
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };

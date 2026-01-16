@@ -244,8 +244,8 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
     params.chkpt_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("chkpt_interval"));
     params.rb_limit = Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_limit"));
-    params.rb_interval_limit =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_interval_limit"));
+    params.rb_aging_limit =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_aging_limit"));
     params.mape_threshold =
         Rcpp::as<std::vector<double>>(global_rt_setup->operator[]("mape_threshold"));
     params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
@@ -612,7 +612,7 @@ int main(int argc, char *argv[]) {
     chemistry.masterEnableSurrogates(surr_setup);
 
     ControlConfig config(run_params.ctrl_interval, run_params.chkpt_interval,
-                         run_params.rb_limit, run_params.rb_interval_limit,
+                         run_params.rb_limit, run_params.rb_aging_limit,
                          run_params.zero_abs, run_params.mape_threshold);
 
     ControlModule control(config, &chemistry);

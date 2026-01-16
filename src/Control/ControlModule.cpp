@@ -46,11 +46,14 @@ void poet::ControlModule::trackStabPhase() {
   flush_request = false;
 }
 
+/* Decrease rollback counter after stable surrogate uptime */
 void poet::ControlModule::trackSurrUptime() {
   if (rb_enabled || rb_count == 0 || inWarmup())
     return;
+  if (config.rb_aging_limit == 0 || config.rb_limit == 0)
+    return;
   ++surr_active;
-  if (surr_active >= config.rb_interval_limit) {
+  if (surr_active >= config.rb_aging_limit) {
     surr_active = 0;
     --rb_count;
     std::cout << "Rollback count decreased by one: " << rb_count << std::endl;
@@ -76,9 +79,10 @@ void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled)
     trackStabPhase();
     return;
   }
+
   std::cout << "Interpolating." << std::endl;
   setSurrState({false, dht_enabled, interp_enabled});
-  trackSurrUptime();
+  if (interp_enabled) trackSurrUptime();
 }
 
 void poet::ControlModule::writeCheckpoint(uint32_t &iter, const std::string &out_dir) {
@@ -233,6 +237,7 @@ void poet::ControlModule::triggerRb(uint32_t &curr_iter, const std::string &out_
   uint32_t target = calcRbIter();
   readCheckpoint(curr_iter, target, out_dir);
 
+  surr_active = 0;
   rb_enabled = true;
   rb_count++;
   stab_countdown = config.ctrl_interval;
