@@ -119,7 +119,7 @@ void poet::ControlModule::writeMetrics(const std::string &out_dir,
   double stats_a, stats_b;
 
   stats_a = MPI_Wtime();
-  writeStatsToCSV(s_history, species, out_dir, "metrics_overview");
+  writeStatsToCSV(s_history, species, out_dir, "metrics_overview", config);
   stats_b = MPI_Wtime();
 
   this->stats_t += stats_b - stats_a;

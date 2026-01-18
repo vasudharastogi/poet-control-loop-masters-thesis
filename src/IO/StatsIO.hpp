@@ -3,5 +3,5 @@
 
 namespace poet {
 void writeStatsToCSV(const std::vector<SpeciesMetrics> &all_stats, const std::vector<std::string> &species_names,
-                     const std::string &out_dir, const std::string &filename);
+                     const std::string &out_dir, const std::string &filename, const ControlConfig &config);
 } // namespace poet
