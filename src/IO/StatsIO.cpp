@@ -1,4 +1,5 @@
 // #include "IO/StatsIO.hpp"
+#include "IO/StatsIO.hpp"
 #include "Control/ControlModule.hpp"
 #include "IO/HDF5Functions.hpp"
 #include <cstdint>
@@ -83,7 +84,6 @@ int write_metrics(const std::vector<poet::CellMetrics> &metrics_history,
         conc_row.resize(1 + n_species, std::numeric_limits<double>::quiet_NaN());
       }
 
-      // Append to per-cell matrices
       mape_per_cell[cell_id].push_back(std::move(mape_row));
       rrmse_per_cell[cell_id].push_back(std::move(rrmse_row));
       conc_per_cell[cell_id].push_back(std::move(conc_row));
@@ -116,14 +116,12 @@ void writeCellStatsToCSV(const std::vector<poet::CellMetrics> &all_stats,
     return;
   }
 
-  // Header
   out << std::left << std::setw(15) << "CellID" << std::setw(15) << "Iteration"
       << std::setw(15) << "Rollback" << std::setw(15) << "Species" << std::setw(15)
       << "MAPE" << std::setw(15) << "RRMSE"
       << "\n"
       << std::string(90, '-') << "\n";
 
-  // Data rows (fix column ordering: include rb_count before Species)
   for (const auto &metrics : all_stats) {
     for (size_t cell_idx = 0; cell_idx < metrics.id.size(); ++cell_idx) {
       for (size_t sp_idx = 0; sp_idx < species_names.size(); ++sp_idx) {
@@ -141,12 +139,20 @@ void writeCellStatsToCSV(const std::vector<poet::CellMetrics> &all_stats,
 
 void writeSpeciesStatsToCSV(const std::vector<poet::SpeciesMetrics> &all_stats,
                             const std::vector<std::string> &species_names,
-                            const std::string &out_dir, const std::string &filename) {
+                            const std::string &out_dir, const std::string &filename,
+                            const poet::ControlConfig &config) {
   std::ofstream out(std::filesystem::path(out_dir) / filename);
   if (!out.is_open()) {
     std::cerr << "Could not open " << filename << " !" << std::endl;
     return;
   }
+  out << "Configuration Parameters:\n";
+  out << "stab_interval: " << config.stab_interval << std::endl;
+  out << "rb_limit: " << config.rb_limit << std::endl;
+  out << "rb_aging_limit: " << config.rb_aging_limit << std::endl;
+  out << "mape_threshold: " << config.mape_threshold[0] << std::endl;
+
+  out << "\n\n";
 
   // Header
   out << std::left << std::setw(15) << "Iteration" << std::setw(15) << "Rollback"

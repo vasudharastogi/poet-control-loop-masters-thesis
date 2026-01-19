@@ -243,8 +243,8 @@ int parseInitValues(int argc, char **argv, RuntimeParameters &params) {
     params.chkpt_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("chkpt_interval"));
     params.rb_limit = Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_limit"));
-    params.rb_interval_limit =
-        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_interval_limit"));
+    params.rb_aging_limit =
+        Rcpp::as<uint32_t>(global_rt_setup->operator[]("rb_aging_limit"));
     params.stab_interval =
         Rcpp::as<uint32_t>(global_rt_setup->operator[]("stab_interval"));
     params.zero_abs = Rcpp::as<double>(global_rt_setup->operator[]("zero_abs"));
@@ -675,9 +675,9 @@ int main(int argc, char *argv[]) {
       chemistry.masterSetField(init_list.getInitialGrid());
 
       ControlConfig config(run_params.stab_interval, run_params.chkpt_interval,
-                           run_params.rb_limit, run_params.rb_interval_limit,
+                           run_params.rb_limit, run_params.rb_aging_limit,
                            run_params.zero_abs, run_params.mape_threshold);
-      ControlModule control(config, chemistry);
+      ControlModule control(config, &chemistry);
       chemistry.SetControlModule(&control);
 
       Rcpp::List profiling = RunMasterLoop(R, run_params, diffusion, chemistry, control);

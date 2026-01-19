@@ -5,8 +5,10 @@
 #include <cmath>
 #include <numeric>
 
-poet::ControlModule::ControlModule(const ControlConfig &config_, ChemistryModule &chem)
-    : config(config_), chem_(chem) {}
+poet::ControlModule::ControlModule(const ControlConfig &cfg, ChemistryModule *chm)
+    : config(cfg), chem(chm) {}
+
+bool poet::ControlModule::inWarmup() const { return global_iter <= config.stab_interval; }
 
 void poet::ControlModule::beginIteration(uint32_t &iter, const bool &dht_enabled,
                                          const bool &interp_enabled) {
@@ -18,55 +20,66 @@ void poet::ControlModule::beginIteration(uint32_t &iter, const bool &dht_enabled
   this->prep_t += prep_b - prep_a;
 }
 
-void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled) {
-  bool in_warmup = (global_iter <= config.stab_interval);
-  bool rb_limit_reached = rbLimitReached();
+void poet::ControlModule::setSurrState(const SurrState &state) {
+  chem->SetStabEnabled(state.stab_enabled);
+  chem->SetDhtEnabled(state.dht_enabled);
+  chem->SetInterpEnabled(state.interp_enabled);
+}
 
-  if (rb_enabled && stab_countdown > 0) {
-    --stab_countdown;
-    std::cout << "Rollback counter: " << std::to_string(stab_countdown) << std::endl;
-    if (stab_countdown == 0) {
-      rb_enabled = false;
-    }
+void poet::ControlModule::trackStabPhase() {
+  if (!rb_enabled || stab_countdown == 0 || rbLimitReached()) {
+    return;
   }
-  /* disables surrogate during warmup, active rollback or after rollback limit is reached
-   */
-  if (in_warmup || rb_enabled || rb_limit_reached) {
-    chem_.SetStabEnabled(!rb_limit_reached);
-    chem_.SetDhtEnabled(false);
-    chem_.SetInterpEnabled(false);
+  --stab_countdown;
+  std::cout << "Stabilization countdown: " << stab_countdown << std::endl;
+  if (stab_countdown == 0) {
+    rb_enabled = false;
+    std::cout << "Stabilization complete, surrogate re-enabled." << std::endl;
+  }
+}
 
-    if (rb_limit_reached) {
-      std::cout << "Interpolation completely disabled." << std::endl;
-    } else {
-      std::cout << "In stabilization phase." << std::endl;
-    }
+void poet::ControlModule::trackSurrUptime() {
+
+  if (rb_enabled || rb_count == 0 || inWarmup())
+    return;
+  if (config.rb_aging_limit == 0 || config.rb_limit == 0)
+    return;
+  surr_active++;
+  if (surr_active > config.rb_aging_limit) {
+    surr_active = 0;
+    --rb_count;
+    std::cout << "Rollback count decreased by one: " << rb_count << std::endl;
+  }
+}
+void poet::ControlModule::updateSurrState(bool dht_enabled, bool interp_enabled) {
+
+  if (inWarmup()) {
+    setSurrState({true, false, false});
+    return;
+  }
+  if (rbLimitReached()) {
+    std::cout << "Interpolation completely disabled." << std::endl;
+    setSurrState({false, false, false});
+    return;
+  }
+  if (rb_enabled) {
+    std::cout << "In stabilization phase." << std::endl;
+    setSurrState({true, false, false});
+    trackStabPhase();
     return;
   }
 
-  if (rb_count > 0 && !rb_enabled && !in_warmup) {
-    surr_active++;
-    if (surr_active > config.rb_interval_limit) {
-      surr_active = 0;
-      rb_count -= 1;
-      std::cout << "Surr active counter: " << surr_active
-                << ", rb interval limit: " << config.rb_interval_limit << std::endl;
-      std::cout << "Rollback count reset to: " << rb_count << "." << std::endl;
-    }
-  }
-
-  /* enable user-requested surrogates */
-  chem_.SetStabEnabled(false);
-  chem_.SetDhtEnabled(dht_enabled);
-  chem_.SetInterpEnabled(interp_enabled);
   std::cout << "Interpolating." << std::endl;
+  setSurrState({false, dht_enabled, interp_enabled});
+  if (interp_enabled)
+    trackSurrUptime();
 }
 
 void poet::ControlModule::writeCheckpoint(uint32_t &iter, const std::string &out_dir) {
   if (global_iter % config.chkpt_interval == 0) {
     double w_check_a = MPI_Wtime();
     write_checkpoint(out_dir, "checkpoint" + std::to_string(iter) + ".hdf5",
-                     {.field = chem_.getField(), .iteration = iter});
+                     {.field = chem->getField(), .iteration = iter});
     double w_check_b = MPI_Wtime();
     this->w_check_t += w_check_b - w_check_a;
   }
@@ -77,7 +90,7 @@ void poet::ControlModule::readCheckpoint(uint32_t &current_iter, uint32_t rollba
   double r_check_a, r_check_b;
 
   r_check_a = MPI_Wtime();
-  Checkpoint_s checkpoint_read{.field = chem_.getField()};
+  Checkpoint_s checkpoint_read{.field = chem->getField()};
   read_checkpoint(out_dir, "checkpoint" + std::to_string(rollback_iter) + ".hdf5",
                   checkpoint_read);
   current_iter = checkpoint_read.iteration;
@@ -88,7 +101,7 @@ void poet::ControlModule::readCheckpoint(uint32_t &current_iter, uint32_t rollba
 void poet::ControlModule::writeMetrics(uint32_t &iter, const std::string &out_dir,
                                        const std::vector<std::string> &species) {
   double stats_a = MPI_Wtime();
-  writeSpeciesStatsToCSV(s_history, species, out_dir, "species_overview.csv");
+  writeSpeciesStatsToCSV(s_history, species, out_dir, "species_overview.csv", config);
   if (global_iter % (config.chkpt_interval / 2) == 0) {
     write_metrics(c_history, species, out_dir, "metrics_overview.hdf5");
   }

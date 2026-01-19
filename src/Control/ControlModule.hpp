@@ -20,7 +20,7 @@ struct ControlConfig {
   uint32_t stab_interval = 0;
   uint32_t chkpt_interval = 0;
   uint32_t rb_limit = 0;
-  uint32_t rb_interval_limit = 0;
+  uint32_t rb_aging_limit = 0;
   double zero_abs = 0.0;
   std::vector<double> mape_threshold;
 };
@@ -50,10 +50,16 @@ struct SpeciesMetrics {
       : mape(n_species, 0.0), rrmse(n_species, 0.0), iteration(iter), rb_count(count) {}
 };
 
+struct SurrState {
+  bool stab_enabled;
+  bool dht_enabled;
+  bool interp_enabled;
+};
+
 class ControlModule {
 
 public:
-  explicit ControlModule(const ControlConfig &config, ChemistryModule &chem);
+  explicit ControlModule(const ControlConfig &config, ChemistryModule *chem);
 
   /* store global iteration, dht and pht settings */
   void beginIteration(uint32_t &iter, const bool &dht_enabled, const bool &interp_enaled);
@@ -117,8 +123,16 @@ private:
 
   inline bool rbLimitReached() const;
 
+  bool inWarmup() const;
+
+  void setSurrState(const SurrState &state);
+
+  void trackStabPhase();
+
+  void trackSurrUptime();
+
   ControlConfig config;
-  ChemistryModule &chem_;
+  ChemistryModule *chem = nullptr;
 
   std::uint32_t global_iter = 0;
   std::uint32_t rb_count = 0;
