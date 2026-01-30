@@ -222,6 +222,9 @@ inline void printProgressbar(int count_pkgs, int n_wp, int barWidth = 70) {
   std::cout.flush();
   /* end visual progress */
 }
+
+/* extracts control cell output vectors and matches them with their corresponding
+ * surrogate values*/
 inline void poet::ChemistryModule::extractCtrlSurVectors(
     std::unordered_map<uint32_t, std::vector<double>> ctrl_output,
     const std::vector<double> &buffer, uint32_t n_cells, uint32_t prop_count,
@@ -457,12 +460,12 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
     ChemBCast(&this->ai_surrogate_validity_vector.front(), this->n_cells, MPI_INT);
   }
 
-  //if (control->needsFlagBcast()) {
-    ftype = CHEM_CTRL_FLAGS;
-    PropagateFunctionType(ftype);
-    uint32_t ctrl_flags =
-        buildCtrlFlags(this->dht_enabled, this->interp_enabled, this->stab_enabled);
-    ChemBCast(&ctrl_flags, 1, MPI_UINT32_T);
+  // if (control->needsFlagBcast()) {
+  ftype = CHEM_CTRL_FLAGS;
+  PropagateFunctionType(ftype);
+  uint32_t ctrl_flags =
+      buildCtrlFlags(this->dht_enabled, this->interp_enabled, this->stab_enabled);
+  ChemBCast(&ctrl_flags, 1, MPI_UINT32_T);
   //}
   this->ctrl_batch.clear();
 
@@ -544,31 +547,6 @@ void poet::ChemistryModule::MasterRunParallel(double dt) {
 
     extractCtrlSurVectors(this->ctrl_batch, mpi_buffer, this->n_cells, this->prop_count,
                           ctrl_vec, sur_vec);
-
-    // Diagnostics: iterate map correctly
-    if (this->ctrl_batch.size() > this->ctrl_cell_ids.size()) {
-      std::cout << "[Master] Warning: ctrl_batch (" << this->ctrl_batch.size()
-                << ") is larger than ctrl_cell_ids (" << this->ctrl_cell_ids.size()
-                << "). Dumping IDs and species concentrations:" << std::endl;
-
-      for (const auto &kv : this->ctrl_batch) {
-        const uint32_t id = kv.first;
-        const auto &row = kv.second;
-        if (row.empty())
-          continue;
-
-        // Print all columns with names, starting from k = 0
-        for (std::size_t k = 0; k < row.size(); ++k) {
-          std::string name = (k < prop_names.size())
-                                 ? prop_names[k] // species_names/prop_names
-                                 : ("prop" + std::to_string(k)); // fallback
-          std::cout << name << "=" << row[k];
-          if (k + 1 < row.size())
-            std::cout << ", ";
-        }
-        std::cout << std::endl;
-      }
-    }
 
     metrics_a = MPI_Wtime();
     control->computeMetrics(ctrl_vec, sur_vec, prop_names, ctrl_cell_ids.size(),

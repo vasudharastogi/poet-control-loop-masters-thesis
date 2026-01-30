@@ -26,6 +26,7 @@ void poet::ControlModule::setSurrState(const SurrState &state) {
   chem->SetInterpEnabled(state.interp_enabled);
 }
 
+/* counts the stabilization countdown after a rollback */
 void poet::ControlModule::trackStabPhase() {
   if (!rb_enabled || stab_countdown == 0 || rbLimitReached()) {
     return;
@@ -38,6 +39,7 @@ void poet::ControlModule::trackStabPhase() {
   }
 }
 
+/* tracks how long the surrogate has been  active and decreases the rollback count */
 void poet::ControlModule::trackSurrUptime() {
 
   if (rb_enabled || rb_count == 0 || inWarmup())
@@ -240,7 +242,6 @@ void poet::ControlModule::computeCellMetrics(
     const std::vector<std::vector<double>> &sur_values, CellMetrics &c_metrics) {
 
   const size_t n_cells = ref_values.size();
-  // Use ref_values to get n_species instead of accessing potentially uninitialized mape
   const size_t n_species = (n_cells > 0) ? ref_values[0].size() : 0;
 
   if (n_cells == 0 || n_species == 0) {
@@ -249,7 +250,6 @@ void poet::ControlModule::computeCellMetrics(
   }
 
   for (size_t cell_idx = 0; cell_idx < n_cells; ++cell_idx) {
-    // Assign the per-cell id correctly
     c_metrics.id[cell_idx] = static_cast<uint32_t>(ref_values[cell_idx][0]);
 
     for (size_t sp_idx = 2; sp_idx < n_species; ++sp_idx) {
@@ -262,7 +262,6 @@ void poet::ControlModule::computeCellMetrics(
     }
   }
 
-  /* cell_ID and ID columns */
 }
 
 void poet::ControlModule::processCheckpoint(uint32_t &current_iter,
@@ -289,8 +288,6 @@ void poet::ControlModule::processCheckpoint(uint32_t &current_iter,
 }
 
 bool poet::ControlModule::needsFlagBcast() const {
-  // Keep broadcasting flags so all ranks disable interpolation even after rb_limit is
-  // reached
   return (config.rb_limit > 0) && !rbLimitReached();
 }
 

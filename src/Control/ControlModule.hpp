@@ -67,6 +67,7 @@ public:
   void writeMetrics(uint32_t &iter, const std::string &out_dir,
                     const std::vector<std::string> &species);
 
+  /* Computes accuracy metrics (MAPE, RRMSE) by comparing reference and surrogate values */
   void computeMetrics(std::vector<std::vector<double>> &reference_values,
                       std::vector<std::vector<double>> &surrogate_values,
                       const std::vector<std::string> &species,
@@ -75,7 +76,7 @@ public:
   void processCheckpoint(uint32_t &current_iter, const std::string &out_dir,
                          const std::vector<std::string> &species);
 
-  /* Returnn rollback target or nullopt and sets flush_request when threshold is exceeded.
+  /* Returns rollback target or nullopt and sets flush_request when threshold is exceeded.
   It reports the cells which exceed the threshold. */
   std::optional<uint32_t> findRbTarget(const std::vector<std::string> &species);
 
@@ -84,21 +85,21 @@ public:
 
   auto getGlobalIteration() const noexcept { return global_iter; }
 
-  // void setChemistryModule(poet::ChemistryModule *c) { chem = c; }
-
   std::vector<double> getMapeThreshold() const { return this->config.mape_threshold; }
 
   std::vector<uint32_t> getCtrlCellIds() const { return this->ctrl_cell_ids; }
 
+  /* not being used currently */
   bool needsFlagBcast() const;
 
-  /* Profiling getters */
+  /* profiling getters */
   auto getCtrlLogicTime() const { return prep_t; }
   auto getChkptWriteTime() const { return w_check_t; }
   auto getChkptReadTime() const { return r_check_t; }
   auto getMetricsWriteTime() const { return stats_t; }
 
 private:
+  /* updates DHT and interpolation settings based on the control logic */
   void updateSurrState(bool dht_enabled, bool interp_enabled);
 
   void readCheckpoint(uint32_t &current_iter, uint32_t rollback_iter,
@@ -107,28 +108,34 @@ private:
 
   uint32_t calcRbIter();
 
+  /* computes species-level metrics (MAPE, RRMSE) across all cells*/
   void computeSpeciesMetrics(const std::vector<std::vector<double>> &ref_values,
                              const std::vector<std::vector<double>> &sur_values,
                              const std::vector<std::string> &species,
                              uint32_t size_per_prop, SpeciesMetrics &s_metrics);
 
+  /* computes species-level metrics (MAPE, RRMSE) across all cells */
   void computeCellMetrics(const std::vector<std::vector<double>> &ref_values,
                           const std::vector<std::vector<double>> &sur_values,
                           CellMetrics &c_metrics);
 
+  /* computes alpha using the adapted formula */
   inline double computeAlpha(double ref, double sur) const;
 
   static void printExceedingCells(const CellMetrics &c_hist, size_t sp_idx,
                                   double sp_thr);
 
+  /* checks if rollback limit has been reached */
   inline bool rbLimitReached() const;
 
   bool inWarmup() const;
 
   void setSurrState(const SurrState &state);
 
+  /* tracks stabilization phase via counters */
   void trackStabPhase();
-
+  
+  /* tracks active interpolation uptime via counters */
   void trackSurrUptime();
 
   ControlConfig config;
@@ -142,6 +149,7 @@ private:
   std::vector<uint32_t> ctrl_cell_ids;
 
   bool rb_enabled = false;
+  /* signals a checkpoint needs to be restored*/
   bool flush_request = false;
 
   std::vector<CellMetrics> c_history;
