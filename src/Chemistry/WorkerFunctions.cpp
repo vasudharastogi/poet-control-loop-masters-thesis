@@ -153,8 +153,7 @@ void poet::ChemistryModule::copyCtrlPkgs(const WorkPackage &pqc_wp,
 
   copyPkgs(pqc_wp, mpi_buffer);
 
-  // s_curr_wp only contains the interpolated data
-  // copy surrogate output after the the pqc output, mpi_buffer[pqc][interp]
+  /* s_curr_wp only contains the interpolated data */
 
   for (std::size_t wp_i = 0; wp_i < surr_wp.size; wp_i++) {
     if (surr_wp.mapping[wp_i] != CHEM_PQC) {
@@ -212,11 +211,6 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_co
   // current work package start location in field
   wp_start_index = mpi_buffer[count + 4];
 
-  /*
-  std::cout << "warmup_enabled is " << stab_enabled << ", ctrl_enabled is "
-            << ctrl_enabled << ", dht_enabled is " << dht_enabled
-            << ", interp_enabled is " << interp_enabled << std::endl;
-  */
 
   for (std::size_t wp_i = 0; wp_i < s_curr_wp.size; wp_i++) {
     s_curr_wp.input[wp_i] =
@@ -260,7 +254,6 @@ void poet::ChemistryModule::WorkerDoWork(MPI_Status &probe_status, int double_co
 
   /* create a copy of surrogate results, reset the output and mappings
     and simulate them again with phreeqc */
-
   poet::WorkPackage s_curr_wp_control = s_curr_wp;
 
   if (ctrl_enabled) {

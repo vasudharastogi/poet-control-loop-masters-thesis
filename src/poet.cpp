@@ -428,12 +428,12 @@ static Rcpp::List RunMasterLoop(RInsidePOET &R, RuntimeParameters &params,
   ctrl_profiling["recv_data_master"] = chem.GetMasterRecvCtrlDataTime();
   ctrl_profiling["worker"] = Rcpp::wrap(chem.GetWorkerControlTimings());
 
-  // if (params.use_dht) {
-  chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
-  chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
-  chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
-  chem_profiling["dht_fill_time"] = Rcpp::wrap(chem.GetWorkerDHTFillTimings());
-  //}
+  if (params.use_dht) {
+    chem_profiling["dht_hits"] = Rcpp::wrap(chem.GetWorkerDHTHits());
+    chem_profiling["dht_evictions"] = Rcpp::wrap(chem.GetWorkerDHTEvictions());
+    chem_profiling["dht_get_time"] = Rcpp::wrap(chem.GetWorkerDHTGetTimings());
+    chem_profiling["dht_fill_time"] = Rcpp::wrap(chem.GetWorkerDHTFillTimings());
+  }
 
   if (params.use_interp) {
     chem_profiling["interp_w"] = Rcpp::wrap(chem.GetWorkerInterpolationWriteTimings());

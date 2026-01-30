@@ -44,6 +44,7 @@ class ControlModule {
 public:
   explicit ControlModule(const ControlConfig &config, ChemistryModule *chem);
 
+  /* store global iteration, dht and pht settings */
   void beginIteration(const uint32_t &iter, const bool &dht_enabled,
                       const bool &interp_enaled);
 
@@ -53,6 +54,7 @@ public:
 
   std::optional<uint32_t> findRbTarget();
 
+  /* Computes accuracy metrics (MAPE, RRMSE) by comparing reference and surrogate values */
   void computeMetrics(const std::vector<double> &reference_values,
                       const std::vector<double> &surrogate_values,
                       const uint32_t size_per_prop,
@@ -77,6 +79,7 @@ public:
   double getMetricsWriteTime() const { return stats_t; }
 
 private:
+  /* updates DHT and interpolation settings based on the control logic */
   void updateSurrState(bool dht_enabled, bool interp_enabled);
 
   void readCheckpoint(uint32_t &current_iter, uint32_t rollback_iter,
@@ -91,10 +94,13 @@ private:
   SurrState getCurrPhase(bool dht_enabled, bool interp_enabled);
   void setSurrState(const SurrState &state);
 
+  /* tracks stabilization phase via counters */
   void trackStabPhase();
 
+  /* tracks active interpolation uptime via counters */
   void trackSurrUptime();
 
+  /* triggers rollback to a previous iteration */
   void triggerRb(uint32_t &curr_iter, const std::string &out_dir);
 
   ControlConfig config;

@@ -277,12 +277,6 @@ inline void poet::ChemistryModule::MasterSendPkgs(
       send_buffer[end_of_wp + 3] = this->simtime;
       // current work package start location in field
       send_buffer[end_of_wp + 4] = wp_start_index;
-      // control flags (bitmask)
-
-      /* int flags = (this->interp_enabled ? 1 : 0) | (this->dht_enabled ? 2 :
-       0) | (this->warmup_enabled ? 4 : 0) | (this->ctrl_enabled ? 8 : 0);
-       send_buffer[end_of_wp + 5] = static_cast<double>(flags);
-       */
 
       /* ATTENTION Worker p has rank p+1 */
       // MPI_Send(send_buffer, end_of_wp + BUFFER_OFFSET, MPI_DOUBLE, p + 1,
@@ -351,11 +345,6 @@ inline void poet::ChemistryModule::MasterRecvPkgs(worker_list_t &w_list, int &pk
 
       int half = size / 2;
       std::copy(recv_buffer.begin(), recv_buffer.begin() + half, w_list[p - 1].send_addr);
-
-      /*
-      if (w_list[p - 1].surrogate_addr == nullptr) {
-      throw std::runtime_error("MasterRecvPkgs: surrogate_addr is null");
-      }*/
 
       std::copy(recv_buffer.begin() + (size / 2), recv_buffer.begin() + size,
                 w_list[p - 1].surrogate_addr);
