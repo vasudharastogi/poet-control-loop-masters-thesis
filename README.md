@@ -1,3 +1,18 @@
+## About this repo
+
+This is a mirror of GFZ Potsdam's POET (GPL-2.0), a parallel, HPC-capable reactive transport simulator. I worked on this as part of my master's thesis, developing a control component to validate energy-efficient surrogate models used in POET's interpolation-based chemistry approximation.
+
+The control logic is phase-based (warm-up, active interpolation, stabilization, surrogate deactivated) and periodically validates surrogate-modeled cells against the actual PHREEQC chemistry solver, intervening when results drift. Across all experiments, this kept MAPE under the 0.35% reference threshold after 10,000 iterations — outperforming plain interpolation without control.
+
+Two prototypes, on separate branches:
+
+- control-loop-proto1 — **interval-based control**. Baseline approach: periodic control of the simulation field, with stable and reproducible error behavior.
+- control-loop-proto2 — **continuous control**. Builds on proto1 as an analysis tool for deeper insight, via continuous monitoring of specific cells.
+
+Main open issue: both approaches add runtime overhead from filling the hash tables — the key target for future optimization.
+
+All credit for the base POET simulator goes to the team / contributors from University of Potsdam and GFZ Potsdam.
+
 # POET
 
 **NOTE: GFZ is migrating its domain from <gfz-potsdam.de> to <gfz.de>.
